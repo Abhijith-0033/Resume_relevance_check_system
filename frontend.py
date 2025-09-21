@@ -16,7 +16,9 @@ import json
 from typing import Dict, List, Optional
 import re
 from datetime import datetime
-
+import sqlite3
+import requests
+from pathlib import Path
 # Import your backend system
 try:
     from main1 import ResumeRelevanceSystem
@@ -26,7 +28,25 @@ except ImportError:
     BACKEND_AVAILABLE = False
 
 # Database configuration
-DATABASE_PATH = r"D:\mini project\Hackathon\resume_job_system.db"
+# Google Drive file ID
+FILE_ID = "1AGJ3hQxIl6w9i1OKnbzhkdo22nnTvYCz"
+# Local file path where DB will be saved
+DATABASE_PATH = Path("db.sqlite")
+
+# Direct download link
+DOWNLOAD_URL = f"https://drive.google.com/uc?id={FILE_ID}"
+
+# Download DB if it doesn't exist locally
+if not DATABASE_PATH.exists():
+    print("Downloading database...")
+    r = requests.get(DOWNLOAD_URL, allow_redirects=True)
+    with open(DATABASE_PATH, "wb") as f:
+        f.write(r.content)
+    print("Database downloaded.")
+
+# Connect to the local DB
+def get_db_connection():
+    return sqlite3.connect(DATABASE_PATH)
 
 # Page configuration
 st.set_page_config(
@@ -3932,4 +3952,5 @@ def main():
         dashboard_page()
 
 if __name__ == "__main__":
+
     main()
