@@ -4177,7 +4177,7 @@ def main():
     elif selected_page == "View Jobs":
         view_jobs_page()
     elif selected_page == "Individual Analysis":
-        enhanced_individual_analysis_page()
+        individual_analysis_page()
     elif selected_page == "Batch Analysis":
         enhanced_individual_analysis_page()
     elif selected_page == "Manage Resumes":
@@ -4197,6 +4197,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
