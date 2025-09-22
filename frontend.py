@@ -3416,7 +3416,7 @@ def system_statistics_page():
             )
 
 # Option 1: Hardcode the API key directly in the code
-GEMINI_API_KEY = "YOUR_ACTUAL_API_KEY_HERE"  # Replace with your actual API key
+GEMINI_API_KEY = "AIzaSyCLBsVXZzM8XfFQ6oUW0BSrpx0Ut58gcWg"  # Replace with your actual API key
 
 # Option 2: Use environment variable with fallback
 # GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'your_fallback_key_here')
@@ -4197,6 +4197,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
