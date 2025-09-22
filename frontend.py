@@ -3471,16 +3471,16 @@ class GeminiResumeAnalyzer:
             return None
     import time
 
-def safe_generate_content(model, prompt, retries=3, delay=2):
-    for attempt in range(retries):
-        try:
-            return model.generate_content(prompt)
-        except Exception as e:
-            print(f"Attempt {attempt+1} failed: {str(e)}")
-            if attempt < retries - 1:
-                time.sleep(delay)
-            else:
-                return None
+    def safe_generate_content(model, prompt, retries=3, delay=2):
+        for attempt in range(retries):
+            try:
+                return model.generate_content(prompt)
+            except Exception as e:
+                print(f"Attempt {attempt+1} failed: {str(e)}")
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                else:
+                    return None
 
     
     def analyze_resume_comprehensively(self, resume_text: str, job_description: str = "") -> Dict:
@@ -4197,6 +4197,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
