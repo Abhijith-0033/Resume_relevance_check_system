@@ -2141,8 +2141,56 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def calculate_match_percentage(analysis_result: Dict) -> float:
+    """Calculate match percentage based on analysis results"""
+    try:
+        # Get scores from analysis
+        overall_assessment = analysis_result.get("overall_assessment", {})
+        
+        strength_score = float(overall_assessment.get("strength_score", 5))
+        readability_score = float(overall_assessment.get("readability_score", 5))
+        ats_score = float(overall_assessment.get("ats_compatibility", 5))
+        
+        # Calculate weighted average
+        # Strength: 50%, ATS: 30%, Readability: 20%
+        match_percentage = (strength_score * 0.5 + ats_score * 0.3 + readability_score * 0.2) * 10
+        
+        # Factor in job matching if available
+        job_match = analysis_result.get("job_match", {})
+        if job_match and job_match.get('similarity_score', 0) > 0:
+            job_similarity = job_match.get('similarity_score', 0)
+            # Blend the scores: 70% resume quality + 30% job match
+            match_percentage = (match_percentage * 0.7) + (job_similarity * 0.3)
+        
+        return round(min(100, max(0, match_percentage)), 1)
+        
+    except Exception as e:
+        logger.error(f"Error calculating match percentage: {str(e)}")
+        return 50.0  # Default fallback score
+        
+    except Exception as e:
+        logger.error(f"Error calculating match percentage: {str(e)}")
+        return 50  # Default fallback
+def get_analyzer_instance(analyzer_type: str = "advanced"):
+    """Get the appropriate analyzer instance"""
+    try:
+        if analyzer_type == "advanced":
+            return ResumeAnalyzer()
+        elif analyzer_type == "text_analysis":
+            return TextAnalysisResumeAnalyzer()
+        else:
+            return SimpleResumeAnalyzer()
+    except Exception as e:
+        logger.error(f"Error initializing {analyzer_type} analyzer: {str(e)}")
+        # Fallback to simple analyzer
+        try:
+            return SimpleResumeAnalyzer()
+        except:
+            return None
+
+
 def perform_batch_evaluation():
-    """Enhanced batch evaluation with comprehensive error handling"""
+    """Enhanced batch evaluation with local analyzers (No API keys required)"""
     
     if 'batch_job_id' not in st.session_state:
         st.error("No job selected for batch evaluation")
@@ -2162,6 +2210,21 @@ def perform_batch_evaluation():
         total_resumes = len(resumes)
         st.markdown(f"### 🔄 Processing {total_resumes} resumes...")
         
+        # Analyzer selection
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info("🤖 Using local AI analyzer - no external APIs required!")
+        with col2:
+            analyzer_type = st.selectbox(
+                "Analyzer Type:",
+                ["advanced", "text_analysis", "simple"],
+                format_func=lambda x: {
+                    "advanced": "🧠 Advanced NLP",
+                    "text_analysis": "📊 Text Analysis", 
+                    "simple": "⚡ Simple"
+                }.get(x, x)
+            )
+        
         # Create progress indicators
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -2172,6 +2235,10 @@ def perform_batch_evaluation():
         successful_analyses = 0
         failed_analyses = 0
         error_details = []
+        
+        # Performance tracking
+        start_time = datetime.now()
+        processing_times = []
         
         # Get job description once
         job_description = ""
@@ -2186,20 +2253,22 @@ def perform_batch_evaluation():
             st.error(f"Error retrieving job description: {str(e)}")
             logger.error(f"Job description error: {str(e)}")
         
-        # Initialize Gemini analyzer with enhanced error handling
+        # Initialize local analyzer with enhanced error handling
         try:
-            analyzer = GeminiResumeAnalyzer()
-            if analyzer.model is None:
-                st.error("Failed to initialize AI analyzer. Check API configuration.")
+            analyzer = get_analyzer_instance(analyzer_type)
+            if analyzer is None:
+                st.error("Failed to initialize any analyzer. Please check your Python environment.")
                 return
-            logger.info("AI analyzer initialized successfully")
+            logger.info(f"Local {analyzer_type} analyzer initialized successfully")
+            st.success(f"✅ {analyzer_type.replace('_', ' ').title()} analyzer ready!")
         except Exception as e:
-            st.error(f"Error initializing AI analyzer: {str(e)}")
+            st.error(f"Error initializing local analyzer: {str(e)}")
             logger.error(f"Analyzer initialization error: {str(e)}")
             return
         
         # Process each resume
         for idx, resume in enumerate(resumes):
+            resume_start_time = datetime.now()
             resume_id, resume_filename, upload_date, user_name = resume[:4]
             
             try:
@@ -2240,6 +2309,7 @@ def perform_batch_evaluation():
                     
                     if len(resume_text.strip()) < 50:
                         logger.warning(f"Resume text seems short: {len(resume_text)} characters")
+                        # Continue processing even with short text
                     
                     logger.info(f"Extracted text: {len(resume_text)} characters")
                     
@@ -2254,15 +2324,27 @@ def perform_batch_evaluation():
                     failed_analyses += 1
                     continue
                 
-                # Perform AI analysis with enhanced error handling
+                # Perform local analysis with enhanced error handling
                 try:
-                    analysis_result = analyzer.analyze_resume_comprehensively(resume_text, job_description)
+                    if hasattr(analyzer, 'analyze_resume_comprehensively'):
+                        analysis_result = analyzer.analyze_resume_comprehensively(resume_text, job_description)
+                    elif hasattr(analyzer, 'basic_analysis'):
+                        analysis_result = analyzer.basic_analysis(resume_text)
+                    else:
+                        raise AttributeError("Analyzer doesn't have expected analysis methods")
                     
-                    if not analysis_result or "error" in analysis_result:
-                        raise ValueError(f"AI analysis failed or returned error: {analysis_result.get('error', 'Unknown error')}")
+                    if not analysis_result:
+                        raise ValueError("Analysis returned empty result")
+                    
+                    if "error" in analysis_result:
+                        raise ValueError(f"Analysis returned error: {analysis_result.get('error', 'Unknown error')}")
                     
                     # Calculate match percentage from analysis
                     match_percentage = calculate_match_percentage(analysis_result)
+                    
+                    # Calculate processing time
+                    processing_time = (datetime.now() - resume_start_time).total_seconds()
+                    processing_times.append(processing_time)
                     
                     # Store successful result
                     result = {
@@ -2273,22 +2355,24 @@ def perform_batch_evaluation():
                         'match_percentage': match_percentage,
                         'analysis': analysis_result,
                         'status': 'success',
+                        'processing_time': processing_time,
+                        'analyzer_type': analyzer_type,
                         'processed_at': datetime.now().isoformat()
                     }
                     
                     batch_results.append(result)
                     successful_analyses += 1
-                    logger.info(f"Successfully analyzed: {resume_filename} - Match: {match_percentage}%")
+                    logger.info(f"Successfully analyzed: {resume_filename} - Match: {match_percentage}% (Time: {processing_time:.2f}s)")
                     
                 except Exception as e:
-                    error_msg = f"AI analysis failed: {str(e)}"
+                    error_msg = f"Local analysis failed: {str(e)}"
                     logger.error(f"Analysis error for {resume_filename}: {error_msg}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     
                     error_details.append({
                         'resume': resume_filename,
                         'error': error_msg,
-                        'stage': 'ai_analysis'
+                        'stage': 'local_analysis'
                     })
                     failed_analyses += 1
                     
@@ -2301,6 +2385,8 @@ def perform_batch_evaluation():
                         'match_percentage': 0,
                         'analysis': {'error': error_msg},
                         'status': 'failed',
+                        'processing_time': 0,
+                        'analyzer_type': analyzer_type,
                         'processed_at': datetime.now().isoformat()
                     }
                     batch_results.append(result)
@@ -2322,9 +2408,12 @@ def perform_batch_evaluation():
         
         # Complete progress
         progress_bar.progress(1.0)
+        total_time = (datetime.now() - start_time).total_seconds()
+        avg_time = sum(processing_times) / len(processing_times) if processing_times else 0
+        
         status_text.text("✅ Batch evaluation completed!")
         
-        # Store results in session state
+        # Store results in session state with enhanced metadata
         st.session_state.batch_results = {
             'results': batch_results,
             'job_id': job_id,
@@ -2334,11 +2423,28 @@ def perform_batch_evaluation():
             'successful': successful_analyses,
             'failed': failed_analyses,
             'error_details': error_details,
+            'analyzer_type': analyzer_type,
+            'performance_stats': {
+                'total_time': total_time,
+                'average_time_per_resume': avg_time,
+                'processing_times': processing_times
+            },
             'processed_at': datetime.now().isoformat()
         }
         
-        # Display summary
-        st.success(f"✅ Batch evaluation completed! {successful_analyses}/{total_resumes} resumes processed successfully.")
+        # Display enhanced summary
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("✅ Successful", successful_analyses, f"out of {total_resumes}")
+        
+        with col2:
+            st.metric("❌ Failed", failed_analyses)
+            
+        with col3:
+            st.metric("⏱️ Avg Time", f"{avg_time:.1f}s", "per resume")
+        
+        st.success(f"🎉 Batch evaluation completed in {total_time:.1f} seconds using {analyzer_type.replace('_', ' ').title()} analyzer!")
         
         if failed_analyses > 0:
             st.warning(f"⚠️ {failed_analyses} resumes failed to process. Check error details below.")
@@ -2349,51 +2455,232 @@ def perform_batch_evaluation():
                 for error in error_details:
                     st.error(f"**{error['resume']}** - {error['stage']}: {error['error']}")
         
-        logger.info(f"Batch evaluation completed: {successful_analyses} successful, {failed_analyses} failed")
+        # Display performance statistics
+        if processing_times:
+            with st.expander("📊 Performance Statistics", expanded=False):
+                st.write(f"**Total Processing Time:** {total_time:.2f} seconds")
+                st.write(f"**Average Time per Resume:** {avg_time:.2f} seconds")
+                st.write(f"**Fastest Analysis:** {min(processing_times):.2f} seconds")
+                st.write(f"**Slowest Analysis:** {max(processing_times):.2f} seconds")
+                st.write(f"**Analyzer Used:** {analyzer_type.replace('_', ' ').title()}")
+        
+        logger.info(f"Batch evaluation completed: {successful_analyses} successful, {failed_analyses} failed, Total time: {total_time:.2f}s")
         
     except Exception as e:
         st.error(f"Critical error in batch evaluation: {str(e)}")
         logger.error(f"Critical batch evaluation error: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
 
-def calculate_match_percentage(analysis_result: Dict) -> int:
-    """Calculate match percentage from analysis result"""
-    try:
-        # Extract scores from analysis
-        overall = analysis_result.get("overall_assessment", {})
-        
-        # Get individual scores
-        strength_score = overall.get("strength_score", "5")
-        readability_score = overall.get("readability_score", "5")
-        ats_score = overall.get("ats_compatibility", "5")
-        
-        # Convert to numbers (handle string scores)
-        scores = []
-        for score in [strength_score, readability_score, ats_score]:
-            try:
-                if isinstance(score, str):
-                    # Extract number from string like "7/10" or "7"
-                    if "/" in score:
-                        score = score.split("/")[0]
-                    score_num = float(score)
-                else:
-                    score_num = float(score)
-                scores.append(min(max(score_num, 0), 10))  # Clamp between 0-10
-            except (ValueError, TypeError):
-                scores.append(5.0)  # Default score
-        
-        # Calculate average and convert to percentage
-        if scores:
-            avg_score = sum(scores) / len(scores)
-            match_percentage = int((avg_score / 10) * 100)
-            return min(max(match_percentage, 0), 100)  # Ensure 0-100 range
-        
-        return 50  # Default if no scores available
-        
-    except Exception as e:
-        logger.error(f"Error calculating match percentage: {str(e)}")
-        return 50  # Default fallback
 
+def display_batch_results():
+    """Enhanced display of batch evaluation results"""
+    
+    if 'batch_results' not in st.session_state:
+        st.warning("No batch evaluation results found. Please run a batch evaluation first.")
+        return
+    
+    batch_data = st.session_state.batch_results
+    results = batch_data.get('results', [])
+    
+    if not results:
+        st.warning("No results to display.")
+        return
+    
+    # Header with job information
+    st.markdown(f"## 📊 Batch Evaluation Results")
+    st.markdown(f"**Job:** {batch_data.get('job_title', 'Unknown')} at {batch_data.get('company_name', 'Unknown')}")
+    st.markdown(f"**Processed:** {batch_data.get('processed_at', 'Unknown')} using {batch_data.get('analyzer_type', 'Unknown').replace('_', ' ').title()} analyzer")
+    
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Resumes", batch_data.get('total_processed', 0))
+    
+    with col2:
+        st.metric("Successful", batch_data.get('successful', 0))
+    
+    with col3:
+        st.metric("Failed", batch_data.get('failed', 0))
+    
+    with col4:
+        success_rate = (batch_data.get('successful', 0) / max(1, batch_data.get('total_processed', 1))) * 100
+        st.metric("Success Rate", f"{success_rate:.1f}%")
+    
+    # Performance stats if available
+    perf_stats = batch_data.get('performance_stats', {})
+    if perf_stats:
+        st.markdown("### ⚡ Performance Statistics")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total Time", f"{perf_stats.get('total_time', 0):.1f}s")
+        
+        with col2:
+            st.metric("Avg per Resume", f"{perf_stats.get('average_time_per_resume', 0):.1f}s")
+        
+        with col3:
+            analyzer_type = batch_data.get('analyzer_type', 'unknown')
+            st.metric("Analyzer Used", analyzer_type.replace('_', ' ').title())
+    
+    # Filter and sort options
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        status_filter = st.selectbox(
+            "Filter by Status",
+            ["All", "Successful", "Failed"],
+            key="batch_status_filter"
+        )
+    
+    with col2:
+        sort_by = st.selectbox(
+            "Sort by",
+            ["Match Percentage (High to Low)", "Match Percentage (Low to High)", 
+             "Name (A-Z)", "Name (Z-A)", "Date Uploaded"],
+            key="batch_sort_option"
+        )
+    
+    with col3:
+        show_details = st.checkbox("Show Analysis Details", value=False)
+    
+    # Filter results
+    filtered_results = results
+    if status_filter == "Successful":
+        filtered_results = [r for r in results if r.get('status') == 'success']
+    elif status_filter == "Failed":
+        filtered_results = [r for r in results if r.get('status') == 'failed']
+    
+    # Sort results
+    if sort_by == "Match Percentage (High to Low)":
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('match_percentage', 0), reverse=True)
+    elif sort_by == "Match Percentage (Low to High)":
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('match_percentage', 0))
+    elif sort_by == "Name (A-Z)":
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('resume_filename', ''))
+    elif sort_by == "Name (Z-A)":
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('resume_filename', ''), reverse=True)
+    elif sort_by == "Date Uploaded":
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('upload_date', ''), reverse=True)
+    
+    # Display results
+    st.markdown(f"### 📋 Results ({len(filtered_results)} resumes)")
+    
+    for idx, result in enumerate(filtered_results, 1):
+        status = result.get('status', 'unknown')
+        match_percentage = result.get('match_percentage', 0)
+        filename = result.get('resume_filename', 'Unknown')
+        user_name = result.get('user_name', 'Unknown')
+        processing_time = result.get('processing_time', 0)
+        
+        # Status indicator
+        status_icon = "✅" if status == 'success' else "❌"
+        status_color = "success" if status == 'success' else "error"
+        
+        with st.container():
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            
+            with col1:
+                st.write(f"{status_icon} **{filename}**")
+                st.caption(f"Candidate: {user_name}")
+            
+            with col2:
+                if status == 'success':
+                    st.metric("Match Score", f"{match_percentage}%")
+                else:
+                    st.write("❌ Processing Failed")
+            
+            with col3:
+                st.write(f"⏱️ {processing_time:.1f}s")
+                st.caption(f"Uploaded: {result.get('upload_date', 'Unknown')}")
+            
+            with col4:
+                if show_details and status == 'success':
+                    if st.button(f"📄 Details", key=f"details_{idx}"):
+                        st.session_state[f'show_analysis_{idx}'] = True
+        
+        # Show detailed analysis if requested
+        if show_details and status == 'success' and st.session_state.get(f'show_analysis_{idx}', False):
+            with st.expander(f"📊 Detailed Analysis: {filename}", expanded=True):
+                analysis = result.get('analysis', {})
+                
+                # Display analysis summary
+                overall = analysis.get('overall_assessment', {})
+                if overall:
+                    subcol1, subcol2, subcol3 = st.columns(3)
+                    
+                    with subcol1:
+                        st.metric("Strength", f"{overall.get('strength_score', 'N/A')}/10")
+                    with subcol2:
+                        st.metric("Readability", f"{overall.get('readability_score', 'N/A')}/10")
+                    with subcol3:
+                        st.metric("ATS Score", f"{overall.get('ats_compatibility', 'N/A')}/10")
+                
+                # Show strengths and weaknesses
+                strengths = analysis.get('strengths', [])
+                weaknesses = analysis.get('weaknesses', [])
+                
+                if strengths:
+                    st.write("**✅ Strengths:**")
+                    for strength in strengths[:3]:  # Show top 3
+                        st.write(f"• {strength}")
+                
+                if weaknesses:
+                    st.write("**⚠️ Areas for Improvement:**")
+                    for weakness in weaknesses[:3]:  # Show top 3
+                        st.write(f"• {weakness}")
+                
+                # Hide details button
+                if st.button(f"Hide Details", key=f"hide_{idx}"):
+                    st.session_state[f'show_analysis_{idx}'] = False
+                    st.rerun()
+        
+        st.divider()
+    
+    # Export options
+    st.markdown("### 📥 Export Results")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Create CSV export
+        if st.button("📊 Export to CSV"):
+            import pandas as pd
+            
+            export_data = []
+            for result in results:
+                export_data.append({
+                    'Resume': result.get('resume_filename', ''),
+                    'Candidate': result.get('user_name', ''),
+                    'Match Percentage': result.get('match_percentage', 0),
+                    'Status': result.get('status', ''),
+                    'Processing Time (s)': result.get('processing_time', 0),
+                    'Upload Date': result.get('upload_date', ''),
+                    'Processed At': result.get('processed_at', '')
+                })
+            
+            df = pd.DataFrame(export_data)
+            csv = df.to_csv(index=False)
+            
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"batch_evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+    
+    with col2:
+        # Create JSON export
+        if st.button("📄 Export Full Report (JSON)"):
+            import json
+            
+            report_json = json.dumps(batch_data, indent=2, default=str)
+            
+            st.download_button(
+                label="Download JSON Report",
+                data=report_json,
+                file_name=f"batch_evaluation_full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
 def extract_text_from_resume_file(file_content, file_extension):
     """Enhanced text extraction with better error handling"""
     try:
@@ -4546,6 +4833,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
