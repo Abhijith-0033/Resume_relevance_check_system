@@ -3166,12 +3166,27 @@ def system_statistics_page():
                 mime="text/csv"
             )
 
+# Option 1: Hardcode the API key directly in the code
+GEMINI_API_KEY = "YOUR_ACTUAL_API_KEY_HERE"  # Replace with your actual API key
+
+# Option 2: Use environment variable with fallback
+# GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'your_fallback_key_here')
+
+# Option 3: Read from a config file
+# import json
+# try:
+#     with open('config.json', 'r') as f:
+#         config = json.load(f)
+#     GEMINI_API_KEY = config['gemini_api_key']
+# except:
+#     GEMINI_API_KEY = "YOUR_FALLBACK_API_KEY_HERE"
 
 class GeminiResumeAnalyzer:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str = None):
         """Initialize Gemini API analyzer"""
-        self.api_key = api_key
-        genai.configure(api_key=api_key)
+        # Use provided API key or fall back to hardcoded key
+        self.api_key = api_key or GEMINI_API_KEY
+        genai.configure(api_key=self.api_key)
         
         # Try different model names based on current API
         try:
@@ -3454,32 +3469,10 @@ class GeminiResumeAnalyzer:
             "error": "API service unavailable"
         }
 
-# Configuration and helper functions
+# Simplified configuration function
 def get_gemini_api_key():
-    """Get Gemini API key from environment or user input"""
-    # Try environment variable first
-    api_key = os.getenv('GEMINI_API_KEY')
-    
-    if not api_key:
-        # If not in environment, get from Streamlit secrets
-        try:
-            api_key = st.secrets.get("GEMINI_API_KEY")
-        except:
-            pass
-    
-    if not api_key:
-        # Ask user to input API key
-        with st.sidebar:
-            st.subheader("AI Analysis Configuration")
-            api_key = st.text_input(
-                "Enter Gemini API Key", 
-                type="password",
-                help="Get your free API key from https://makersuite.google.com/app/apikey"
-            )
-            if api_key:
-                st.success("API key configured!")
-    
-    return api_key
+    """Get Gemini API key - now uses hardcoded key"""
+    return GEMINI_API_KEY
 
 def extract_text_from_resume_file(file_content, file_extension):
     """Extract text from uploaded resume file"""
@@ -3777,29 +3770,20 @@ def display_gemini_analysis_results(analysis_result: Dict, learning_path: Dict =
         )
 
 def enhanced_individual_analysis_page():
-    """Enhanced individual analysis page with Gemini AI"""
+    """Enhanced individual analysis page with Gemini AI - no manual API key required"""
     st.markdown('<h1 class="main-header">AI-Powered Resume Analysis</h1>', unsafe_allow_html=True)
     
-    # Get Gemini API key
-    api_key = get_gemini_api_key()
-    
-    if not api_key:
-        st.warning("Please configure your Gemini API key to use AI analysis features.")
-        st.info("You can get a free API key from: https://aistudio.google.com/")
-        return
-    
-    # Initialize analyzer with better error handling
+    # Initialize analyzer with hardcoded API key
     try:
         with st.spinner("Initializing AI analyzer..."):
-            analyzer = GeminiResumeAnalyzer(api_key)
+            analyzer = GeminiResumeAnalyzer()  # No need to pass API key
             if analyzer.model is None:
-                st.error("Failed to initialize AI model. Please check your API key and try again.")
-                st.info("Make sure you have access to Gemini API models in your Google Cloud project.")
+                st.error("Failed to initialize AI model. Please check your API key configuration.")
                 return
             st.success("AI analyzer ready!")
     except Exception as e:
         st.error(f"Error initializing AI analyzer: {str(e)}")
-        st.info("Please check your API key and internet connection.")
+        st.info("Please check your API key configuration in the code.")
         return
     
     # Get data from database
@@ -3903,11 +3887,6 @@ def enhanced_individual_analysis_page():
         else:
             st.warning("Please select a resume to analyze")
 
-# Update your main routing to include the enhanced analysis
-# Add this to your main() function's page routing:
-
-# elif selected_page == "Individual Analysis":
-#     enhanced_individual_analysis_page()
 def main():
     """Main application function"""
     init_session_state()
@@ -3954,3 +3933,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
