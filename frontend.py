@@ -32,6 +32,12 @@ import time
 from datetime import datetime
 from typing import Dict, List, Any
 import logging
+# Download required NLTK data
+nltk.download('punkt')   # Sentence tokenizer
+nltk.download('stopwords')  # Optional: if you use stopwords
+nltk.download('averaged_perceptron_tagger')  # Optional: for POS tagging
+nltk.download('maxent_ne_chunker')  # Optional: for named entity recognition
+nltk.download('words')  # Optional: for NE recognition
 try:
     import fitz
 except ModuleNotFoundError:
@@ -4833,6 +4839,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
