@@ -4499,7 +4499,7 @@ st.markdown("""
     text-align: center;
 }
 </style>
-""", unsafe_allow
+""",  unsafe_allow_html=True)
 def main():
     """Main application function"""
     init_session_state()
@@ -4546,6 +4546,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
