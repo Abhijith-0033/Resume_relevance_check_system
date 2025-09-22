@@ -19,6 +19,10 @@ from datetime import datetime
 import sqlite3
 import requests
 from pathlib import Path
+import traceback
+from datetime import datetime
+from typing import Dict, List, Any
+import logging
 # Import your backend system
 try:
     from main1 import ResumeRelevanceSystem
@@ -27,6 +31,9 @@ except ImportError:
     st.error("Backend system not found. Please ensure resume_relevance_system.py is in the same directory.")
     BACKEND_AVAILABLE = False
 
+# Set up logging for better debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 # Database configuration
 # Google Drive file ID
 FILE_ID = "1AGJ3hQxIl6w9i1OKnbzhkdo22nnTvYCz"
@@ -2107,113 +2114,560 @@ def batch_evaluation_page():
     if 'batch_results' in st.session_state:
         display_batch_results()
 
+import streamlit as st
+import tempfile
+import os
+import json
+import traceback
+from datetime import datetime
+from typing import Dict, List, Any
+import logging
+
+# Set up logging for better debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def perform_batch_evaluation():
-    """Perform batch evaluation of all resumes against selected job"""
+    """Enhanced batch evaluation with comprehensive error handling"""
     
-    # Get all resumes
-    resumes = get_user_resumes()
-    job_id = st.session_state.batch_job_id
-    
-    if not resumes:
-        st.error("No resumes available for evaluation")
+    if 'batch_job_id' not in st.session_state:
+        st.error("No job selected for batch evaluation")
         return
     
-    # Initialize progress tracking
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    results = []
+    job_id = st.session_state.batch_job_id
     
     try:
-        # Initialize backend system
-        system = init_backend_system()
-        if not system:
-            st.error("Backend system not available")
+        # Get all resumes and job description
+        resumes = get_user_resumes()  # Assuming this function exists
+        
+        if not resumes:
+            st.error("No resumes found for evaluation")
             return
         
-        # Add job description to backend system first
-        job_content = get_file_from_db(job_id, "job")
-        if not job_content:
-            st.error("Could not retrieve job description")
-            return
+        # Initialize progress tracking
+        total_resumes = len(resumes)
+        st.markdown(f"### 🔄 Processing {total_resumes} resumes...")
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as job_tmp:
-            job_tmp.write(job_content)
-            job_tmp_path = job_tmp.name
+        # Create progress indicators
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        results_container = st.empty()
         
+        # Initialize results storage
+        batch_results = []
+        successful_analyses = 0
+        failed_analyses = 0
+        error_details = []
+        
+        # Get job description once
+        job_description = ""
         try:
-            backend_job_id = system.add_job_description(
-                job_tmp_path, 
-                st.session_state.batch_company_name, 
-                st.session_state.batch_job_title
-            )
-            
-            if not backend_job_id:
-                st.error("Failed to process job description")
+            job_content = get_file_from_db(job_id, "job")
+            if job_content:
+                job_description = extract_text_from_resume_file(job_content, 'txt')
+                logger.info(f"Successfully extracted job description: {len(job_description)} characters")
+            else:
+                st.warning("Could not retrieve job description content")
+        except Exception as e:
+            st.error(f"Error retrieving job description: {str(e)}")
+            logger.error(f"Job description error: {str(e)}")
+        
+        # Initialize Gemini analyzer with enhanced error handling
+        try:
+            analyzer = GeminiResumeAnalyzer()
+            if analyzer.model is None:
+                st.error("Failed to initialize AI analyzer. Check API configuration.")
                 return
+            logger.info("AI analyzer initialized successfully")
+        except Exception as e:
+            st.error(f"Error initializing AI analyzer: {str(e)}")
+            logger.error(f"Analyzer initialization error: {str(e)}")
+            return
+        
+        # Process each resume
+        for idx, resume in enumerate(resumes):
+            resume_id, resume_filename, upload_date, user_name = resume[:4]
             
-            # Process each resume
-            total_resumes = len(resumes)
-            
-            for i, resume in enumerate(resumes):
-                resume_id, name, email, uploaded_at, username = resume
-                
+            try:
                 # Update progress
-                progress = (i + 1) / total_resumes
+                progress = (idx + 1) / total_resumes
                 progress_bar.progress(progress)
-                status_text.text(f"Evaluating resume {i + 1}/{total_resumes}: {name}")
+                status_text.text(f"Processing: {resume_filename} ({idx + 1}/{total_resumes})")
                 
+                # Log processing start
+                logger.info(f"Processing resume {idx + 1}/{total_resumes}: {resume_filename}")
+                
+                # Get resume content with error handling
+                resume_content = None
                 try:
-                    # Get resume content from database
                     resume_content = get_file_from_db(resume_id, "resume")
-                    
-                    if resume_content:
-                        # Save resume temporarily
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as resume_tmp:
-                            resume_tmp.write(resume_content)
-                            resume_tmp_path = resume_tmp.name
-                        
-                        try:
-                            # Add resume to backend system
-                            backend_resume_id = system.add_resume(resume_tmp_path, name, email)
-                            
-                            if backend_resume_id:
-                                # Perform evaluation
-                                evaluation = system.evaluate_resume(backend_resume_id, backend_job_id)
-                                
-                                if evaluation:
-                                    # Add candidate info to results
-                                    evaluation['candidate_name'] = name
-                                    evaluation['candidate_email'] = email
-                                    evaluation['username'] = username
-                                    evaluation['resume_id'] = resume_id
-                                    evaluation['uploaded_at'] = uploaded_at
-                                    results.append(evaluation)
-                        
-                        finally:
-                            os.unlink(resume_tmp_path)
-                
+                    if not resume_content:
+                        raise ValueError(f"No content retrieved for resume ID {resume_id}")
+                    logger.info(f"Retrieved resume content: {len(resume_content)} bytes")
                 except Exception as e:
-                    st.warning(f"Error evaluating {name}: {str(e)}")
+                    error_msg = f"Failed to retrieve resume content: {str(e)}"
+                    logger.error(error_msg)
+                    error_details.append({
+                        'resume': resume_filename,
+                        'error': error_msg,
+                        'stage': 'content_retrieval'
+                    })
+                    failed_analyses += 1
                     continue
+                
+                # Extract text from resume with enhanced error handling
+                resume_text = ""
+                try:
+                    file_extension = resume_filename.split('.')[-1].lower() if '.' in resume_filename else 'pdf'
+                    resume_text = extract_text_from_resume_file(resume_content, file_extension)
+                    
+                    if "Error" in resume_text:
+                        raise ValueError(f"Text extraction failed: {resume_text}")
+                    
+                    if len(resume_text.strip()) < 50:
+                        logger.warning(f"Resume text seems short: {len(resume_text)} characters")
+                    
+                    logger.info(f"Extracted text: {len(resume_text)} characters")
+                    
+                except Exception as e:
+                    error_msg = f"Failed to extract text: {str(e)}"
+                    logger.error(error_msg)
+                    error_details.append({
+                        'resume': resume_filename,
+                        'error': error_msg,
+                        'stage': 'text_extraction'
+                    })
+                    failed_analyses += 1
+                    continue
+                
+                # Perform AI analysis with enhanced error handling
+                try:
+                    analysis_result = analyzer.analyze_resume_comprehensively(resume_text, job_description)
+                    
+                    if not analysis_result or "error" in analysis_result:
+                        raise ValueError(f"AI analysis failed or returned error: {analysis_result.get('error', 'Unknown error')}")
+                    
+                    # Calculate match percentage from analysis
+                    match_percentage = calculate_match_percentage(analysis_result)
+                    
+                    # Store successful result
+                    result = {
+                        'resume_id': resume_id,
+                        'resume_filename': resume_filename,
+                        'user_name': user_name,
+                        'upload_date': upload_date,
+                        'match_percentage': match_percentage,
+                        'analysis': analysis_result,
+                        'status': 'success',
+                        'processed_at': datetime.now().isoformat()
+                    }
+                    
+                    batch_results.append(result)
+                    successful_analyses += 1
+                    logger.info(f"Successfully analyzed: {resume_filename} - Match: {match_percentage}%")
+                    
+                except Exception as e:
+                    error_msg = f"AI analysis failed: {str(e)}"
+                    logger.error(f"Analysis error for {resume_filename}: {error_msg}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    
+                    error_details.append({
+                        'resume': resume_filename,
+                        'error': error_msg,
+                        'stage': 'ai_analysis'
+                    })
+                    failed_analyses += 1
+                    
+                    # Add failed result to maintain record
+                    result = {
+                        'resume_id': resume_id,
+                        'resume_filename': resume_filename,
+                        'user_name': user_name,
+                        'upload_date': upload_date,
+                        'match_percentage': 0,
+                        'analysis': {'error': error_msg},
+                        'status': 'failed',
+                        'processed_at': datetime.now().isoformat()
+                    }
+                    batch_results.append(result)
+                    continue
+                
+            except Exception as e:
+                # Catch-all for any unexpected errors
+                error_msg = f"Unexpected error processing resume: {str(e)}"
+                logger.error(f"Unexpected error for {resume_filename}: {error_msg}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                error_details.append({
+                    'resume': resume_filename,
+                    'error': error_msg,
+                    'stage': 'general_processing'
+                })
+                failed_analyses += 1
+                continue
         
-        finally:
-            os.unlink(job_tmp_path)
-        
-        # Sort results by relevance score (highest first)
-        results.sort(key=lambda x: x['relevance_score'], reverse=True)
+        # Complete progress
+        progress_bar.progress(1.0)
+        status_text.text("✅ Batch evaluation completed!")
         
         # Store results in session state
-        st.session_state.batch_results = results
+        st.session_state.batch_results = {
+            'results': batch_results,
+            'job_id': job_id,
+            'job_title': st.session_state.get('batch_job_title', 'Unknown'),
+            'company_name': st.session_state.get('batch_company_name', 'Unknown'),
+            'total_processed': total_resumes,
+            'successful': successful_analyses,
+            'failed': failed_analyses,
+            'error_details': error_details,
+            'processed_at': datetime.now().isoformat()
+        }
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
+        # Display summary
+        st.success(f"✅ Batch evaluation completed! {successful_analyses}/{total_resumes} resumes processed successfully.")
         
-        st.success(f"✅ Batch evaluation completed! Evaluated {len(results)} resumes.")
-        st.rerun()
+        if failed_analyses > 0:
+            st.warning(f"⚠️ {failed_analyses} resumes failed to process. Check error details below.")
+        
+        # Display error details if any
+        if error_details:
+            with st.expander(f"❌ Error Details ({len(error_details)} errors)", expanded=False):
+                for error in error_details:
+                    st.error(f"**{error['resume']}** - {error['stage']}: {error['error']}")
+        
+        logger.info(f"Batch evaluation completed: {successful_analyses} successful, {failed_analyses} failed")
         
     except Exception as e:
-        st.error(f"Error during batch evaluation: {str(e)}")
+        st.error(f"Critical error in batch evaluation: {str(e)}")
+        logger.error(f"Critical batch evaluation error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+def calculate_match_percentage(analysis_result: Dict) -> int:
+    """Calculate match percentage from analysis result"""
+    try:
+        # Extract scores from analysis
+        overall = analysis_result.get("overall_assessment", {})
+        
+        # Get individual scores
+        strength_score = overall.get("strength_score", "5")
+        readability_score = overall.get("readability_score", "5")
+        ats_score = overall.get("ats_compatibility", "5")
+        
+        # Convert to numbers (handle string scores)
+        scores = []
+        for score in [strength_score, readability_score, ats_score]:
+            try:
+                if isinstance(score, str):
+                    # Extract number from string like "7/10" or "7"
+                    if "/" in score:
+                        score = score.split("/")[0]
+                    score_num = float(score)
+                else:
+                    score_num = float(score)
+                scores.append(min(max(score_num, 0), 10))  # Clamp between 0-10
+            except (ValueError, TypeError):
+                scores.append(5.0)  # Default score
+        
+        # Calculate average and convert to percentage
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            match_percentage = int((avg_score / 10) * 100)
+            return min(max(match_percentage, 0), 100)  # Ensure 0-100 range
+        
+        return 50  # Default if no scores available
+        
+    except Exception as e:
+        logger.error(f"Error calculating match percentage: {str(e)}")
+        return 50  # Default fallback
+
+def extract_text_from_resume_file(file_content, file_extension):
+    """Enhanced text extraction with better error handling"""
+    try:
+        logger.info(f"Extracting text from {file_extension} file ({len(file_content)} bytes)")
+        
+        if file_extension.lower() == 'pdf':
+            return extract_pdf_text(file_content)
+        elif file_extension.lower() in ['docx', 'doc']:
+            return extract_docx_text(file_content)
+        elif file_extension.lower() == 'txt':
+            return extract_txt_text(file_content)
+        else:
+            # Try to decode as text
+            try:
+                text = file_content.decode('utf-8', errors='ignore')
+                if len(text.strip()) > 0:
+                    return text
+                else:
+                    raise ValueError("Decoded text is empty")
+            except Exception as e:
+                return f"Error: Unsupported file format '{file_extension}': {str(e)}"
+                
+    except Exception as e:
+        logger.error(f"Text extraction error: {str(e)}")
+        return f"Error extracting text: {str(e)}"
+
+def extract_pdf_text(file_content):
+    """Extract text from PDF with fallback options"""
+    try:
+        # Try PyMuPDF first
+        try:
+            import fitz  # PyMuPDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(file_content)
+                tmp_file_path = tmp_file.name
+            
+            doc = fitz.open(tmp_file_path)
+            text = ""
+            for page_num in range(doc.page_count):
+                page = doc[page_num]
+                text += page.get_text()
+            doc.close()
+            os.unlink(tmp_file_path)
+            
+            if len(text.strip()) > 0:
+                return text
+            else:
+                raise ValueError("PDF appears to be empty or image-based")
+                
+        except ImportError:
+            # Try pdfplumber as fallback
+            try:
+                import pdfplumber
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(file_content)
+                    tmp_file_path = tmp_file.name
+                
+                text = ""
+                with pdfplumber.open(tmp_file_path) as pdf:
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text
+                
+                os.unlink(tmp_file_path)
+                
+                if len(text.strip()) > 0:
+                    return text
+                else:
+                    raise ValueError("PDF appears to be empty or image-based")
+                    
+            except ImportError:
+                return "Error: No PDF processing library available (install PyMuPDF or pdfplumber)"
+                
+    except Exception as e:
+        logger.error(f"PDF extraction error: {str(e)}")
+        return f"Error extracting PDF: {str(e)}"
+
+def extract_docx_text(file_content):
+    """Extract text from DOCX files"""
+    try:
+        import docx2txt
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
+            tmp_file.write(file_content)
+            tmp_file_path = tmp_file.name
+        
+        text = docx2txt.process(tmp_file_path)
+        os.unlink(tmp_file_path)
+        
+        if text and len(text.strip()) > 0:
+            return text
+        else:
+            # Try alternative method
+            try:
+                from docx import Document
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
+                    tmp_file.write(file_content)
+                    tmp_file_path = tmp_file.name
+                
+                doc = Document(tmp_file_path)
+                text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+                os.unlink(tmp_file_path)
+                return text
+                
+            except ImportError:
+                return "Error: python-docx library not available"
+                
+    except ImportError:
+        return "Error: docx2txt library not available. Please install python-docx2txt."
+    except Exception as e:
+        logger.error(f"DOCX extraction error: {str(e)}")
+        return f"Error extracting DOCX: {str(e)}"
+
+def extract_txt_text(file_content):
+    """Extract text from TXT files"""
+    try:
+        # Try different encodings
+        encodings = ['utf-8', 'utf-16', 'latin-1', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                text = file_content.decode(encoding)
+                if len(text.strip()) > 0:
+                    return text
+            except UnicodeDecodeError:
+                continue
+        
+        # If all encodings fail, use utf-8 with error handling
+        return file_content.decode('utf-8', errors='replace')
+        
+    except Exception as e:
+        logger.error(f"TXT extraction error: {str(e)}")
+        return f"Error extracting text: {str(e)}"
+
+def display_batch_results():
+    """Enhanced display of batch results with error handling"""
+    
+    if 'batch_results' not in st.session_state:
+        st.warning("No batch results available")
+        return
+    
+    batch_data = st.session_state.batch_results
+    results = batch_data.get('results', [])
+    
+    if not results:
+        st.warning("No results to display")
+        return
+    
+    # Results header
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 15px;
+        margin-bottom: 2rem;
+        text-align: center;
+        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+    ">
+        <h2 style="color: white; margin: 0;">Batch Evaluation Results</h2>
+        <p style="color: rgba(255, 255, 255, 0.9); margin: 0.5rem 0 0 0;">
+            {batch_data.get('job_title', 'Unknown Job')} at {batch_data.get('company_name', 'Unknown Company')}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Resumes", batch_data.get('total_processed', 0))
+    
+    with col2:
+        st.metric("Successfully Processed", batch_data.get('successful', 0), 
+                 delta=f"{batch_data.get('successful', 0) - batch_data.get('failed', 0)}")
+    
+    with col3:
+        st.metric("Failed", batch_data.get('failed', 0))
+    
+    with col4:
+        success_rate = 0
+        if batch_data.get('total_processed', 0) > 0:
+            success_rate = (batch_data.get('successful', 0) / batch_data.get('total_processed', 1)) * 100
+        st.metric("Success Rate", f"{success_rate:.1f}%")
+    
+    # Filter and sort options
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        filter_status = st.selectbox("Filter by Status", ["All", "Success", "Failed"])
+    
+    with col2:
+        sort_by = st.selectbox("Sort by", ["Match %", "Name", "Date"])
+    
+    with col3:
+        sort_order = st.selectbox("Order", ["Descending", "Ascending"])
+    
+    # Filter results
+    filtered_results = results
+    if filter_status != "All":
+        filtered_results = [r for r in results if r['status'] == filter_status.lower()]
+    
+    # Sort results
+    if sort_by == "Match %":
+        filtered_results.sort(key=lambda x: x['match_percentage'], reverse=(sort_order == "Descending"))
+    elif sort_by == "Name":
+        filtered_results.sort(key=lambda x: x['user_name'], reverse=(sort_order == "Descending"))
+    elif sort_by == "Date":
+        filtered_results.sort(key=lambda x: x['upload_date'], reverse=(sort_order == "Descending"))
+    
+    # Display results
+    st.markdown(f"### 📊 Results ({len(filtered_results)} shown)")
+    
+    for i, result in enumerate(filtered_results):
+        with st.expander(
+            f"{'✅' if result['status'] == 'success' else '❌'} "
+            f"{result['user_name']} - {result['match_percentage']}% match",
+            expanded=False
+        ):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Resume:** {result['resume_filename']}")
+                st.write(f"**Uploaded:** {result['upload_date'][:19]}")
+                st.write(f"**Status:** {result['status'].title()}")
+                
+                if result['status'] == 'success':
+                    st.write(f"**Match Percentage:** {result['match_percentage']}%")
+                else:
+                    st.error(f"**Error:** {result['analysis'].get('error', 'Unknown error')}")
+            
+            with col2:
+                if result['status'] == 'success' and 'analysis' in result:
+                    analysis = result['analysis']
+                    overall = analysis.get('overall_assessment', {})
+                    
+                    st.write("**Scores:**")
+                    st.write(f"- Strength: {overall.get('strength_score', 'N/A')}")
+                    st.write(f"- Readability: {overall.get('readability_score', 'N/A')}")
+                    st.write(f"- ATS: {overall.get('ats_compatibility', 'N/A')}")
+                    
+                    if st.button(f"View Details", key=f"detail_{i}"):
+                        st.json(analysis)
+    
+    # Export functionality
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Download results as JSON
+        results_json = json.dumps(batch_data, indent=2)
+        st.download_button(
+            label="📥 Download Results (JSON)",
+            data=results_json,
+            file_name=f"batch_evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+    
+    with col2:
+        # Download results as CSV
+        csv_data = create_csv_from_results(results)
+        st.download_button(
+            label="📊 Download Results (CSV)",
+            data=csv_data,
+            file_name=f"batch_evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+def create_csv_from_results(results):
+    """Create CSV format from results"""
+    import io
+    
+    output = io.StringIO()
+    output.write("User Name,Resume File,Upload Date,Status,Match Percentage,Strength Score,Readability Score,ATS Score\n")
+    
+    for result in results:
+        analysis = result.get('analysis', {})
+        overall = analysis.get('overall_assessment', {})
+        
+        output.write(f"{result['user_name']},")
+        output.write(f"{result['resume_filename']},")
+        output.write(f"{result['upload_date'][:19]},")
+        output.write(f"{result['status']},")
+        output.write(f"{result['match_percentage']},")
+        output.write(f"{overall.get('strength_score', 'N/A')},")
+        output.write(f"{overall.get('readability_score', 'N/A')},")
+        output.write(f"{overall.get('ats_compatibility', 'N/A')}\n")
+    
+    return output.getvalue()
 
 def display_batch_results():
     """Display comprehensive batch evaluation results"""
@@ -3933,4 +4387,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
