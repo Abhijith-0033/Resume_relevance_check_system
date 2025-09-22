@@ -23,6 +23,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, List, Any
 import logging
+import fitz
 # Import your backend system
 try:
     from main1 import ResumeRelevanceSystem
@@ -4387,5 +4388,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
