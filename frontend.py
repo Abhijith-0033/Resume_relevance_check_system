@@ -20,6 +20,14 @@ import sqlite3
 import requests
 from pathlib import Path
 import traceback
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.chunk import ne_chunk
+from nltk.tag import pos_tag
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import textstat
 import time
 from datetime import datetime
 from typing import Dict, List, Any
@@ -4197,6 +4205,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
