@@ -3423,328 +3423,608 @@ def system_statistics_page():
                 mime="text/csv"
             )
 
-# Option 1: Hardcode the API key directly in the code
-GEMINI_API_KEY = "AIzaSyCLBsVXZzM8XfFQ6oUW0BSrpx0Ut58gcWg"  # Replace with your actual API key
 
-# Option 2: Use environment variable with fallback
-# GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'your_fallback_key_here')
-
-# Option 3: Read from a config file
-# import json
-# try:
-#     with open('config.json', 'r') as f:
-#         config = json.load(f)
-#     GEMINI_API_KEY = config['gemini_api_key']
-# except:
-#     GEMINI_API_KEY = "YOUR_FALLBACK_API_KEY_HERE"
-
-class GeminiResumeAnalyzer:
-    def __init__(self, api_key: str = None):
-        """Initialize Gemini API analyzer"""
-        # Use provided API key or fall back to hardcoded key
-        self.api_key = api_key or GEMINI_API_KEY
-        genai.configure(api_key=self.api_key)
-        
-        # Try different model names based on current API
-        try:
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-        except:
-            try:
-                self.model = genai.GenerativeModel('gemini-1.5-pro')
-            except:
-                try:
-                    self.model = genai.GenerativeModel('models/gemini-1.5-flash')
-                except:
-                    # Fallback to listing available models
-                    self.model = self._get_available_model()
+class ResumeAnalyzer:
+    """Advanced resume analyzer using NLP and rule-based analysis (No API required)"""
     
-    def _get_available_model(self):
-        """Get the first available model for text generation"""
-        try:
-            # List available models
-            models = genai.list_models()
-            
-            # Find a model that supports generateContent
-            for model in models:
-                if 'generateContent' in model.supported_generation_methods:
-                    print(f"Using model: {model.name}")
-                    return genai.GenerativeModel(model.name)
-            
-            # If no model found, raise error
-            raise Exception("No compatible models found")
-            
-        except Exception as e:
-            print(f"Error finding available models: {str(e)}")
-            # Return a fallback that will show error gracefully
-            return None
-    import time
-
-    def safe_generate_content(model, prompt, retries=3, delay=2):
-        for attempt in range(retries):
-            try:
-                return model.generate_content(prompt)
-            except Exception as e:
-                print(f"Attempt {attempt+1} failed: {str(e)}")
-                if attempt < retries - 1:
-                    time.sleep(delay)
-                else:
-                    return None
-
+    def __init__(self):
+        """Initialize the analyzer with predefined skills and keywords"""
+        self.technical_skills = {
+            'programming_languages': [
+                'python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'php', 'ruby', 
+                'go', 'rust', 'swift', 'kotlin', 'scala', 'r', 'matlab', 'sql'
+            ],
+            'frameworks': [
+                'react', 'angular', 'vue', 'nodejs', 'express', 'django', 'flask', 
+                'spring', 'laravel', 'rails', 'bootstrap', 'jquery', 'nextjs'
+            ],
+            'databases': [
+                'mysql', 'postgresql', 'mongodb', 'redis', 'sqlite', 'oracle', 
+                'cassandra', 'elasticsearch', 'firebase'
+            ],
+            'cloud_platforms': [
+                'aws', 'azure', 'gcp', 'google cloud', 'digitalocean', 'heroku', 
+                'vercel', 'netlify'
+            ],
+            'tools': [
+                'git', 'docker', 'kubernetes', 'jenkins', 'ansible', 'terraform', 
+                'jira', 'confluence', 'slack', 'trello'
+            ],
+            'data_science': [
+                'pandas', 'numpy', 'scikit-learn', 'tensorflow', 'pytorch', 'keras', 
+                'matplotlib', 'seaborn', 'plotly', 'jupyter'
+            ]
+        }
+        
+        self.soft_skills = [
+            'leadership', 'teamwork', 'communication', 'problem solving', 'analytical',
+            'creative', 'adaptable', 'organized', 'detail oriented', 'time management',
+            'project management', 'collaboration', 'mentoring', 'presentation', 
+            'negotiation', 'critical thinking'
+        ]
+        
+        self.action_verbs = [
+            'achieved', 'analyzed', 'built', 'created', 'designed', 'developed',
+            'engineered', 'enhanced', 'established', 'executed', 'implemented',
+            'improved', 'increased', 'led', 'managed', 'optimized', 'organized',
+            'reduced', 'resolved', 'streamlined', 'supervised'
+        ]
+        
+        # Common job titles and their required skills
+        self.job_skill_mapping = {
+            'software developer': ['programming_languages', 'frameworks', 'databases', 'tools'],
+            'data scientist': ['data_science', 'programming_languages', 'databases'],
+            'web developer': ['programming_languages', 'frameworks', 'databases'],
+            'devops engineer': ['cloud_platforms', 'tools', 'programming_languages'],
+            'project manager': ['soft_skills', 'tools'],
+            'business analyst': ['soft_skills', 'databases', 'tools']
+        }
+    
+    def extract_contact_info(self, text: str) -> Dict:
+        """Extract contact information from resume"""
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        phone_pattern = r'(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+        linkedin_pattern = r'linkedin\.com/in/[\w-]+'
+        github_pattern = r'github\.com/[\w-]+'
+        
+        return {
+            'emails': re.findall(email_pattern, text),
+            'phones': re.findall(phone_pattern, text),
+            'linkedin': re.findall(linkedin_pattern, text, re.IGNORECASE),
+            'github': re.findall(github_pattern, text, re.IGNORECASE)
+        }
+    
+    def extract_skills(self, text: str) -> Dict:
+        """Extract technical and soft skills from resume"""
+        text_lower = text.lower()
+        found_skills = {'technical': {}, 'soft': []}
+        
+        # Extract technical skills
+        for category, skills in self.technical_skills.items():
+            found = []
+            for skill in skills:
+                if skill in text_lower:
+                    found.append(skill)
+            if found:
+                found_skills['technical'][category] = found
+        
+        # Extract soft skills
+        for skill in self.soft_skills:
+            if skill in text_lower:
+                found_skills['soft'].append(skill)
+        
+        return found_skills
+    
+    def analyze_experience(self, text: str) -> Dict:
+        """Analyze work experience section"""
+        # Look for experience indicators
+        experience_patterns = [
+            r'(\d+)[\+\-\s]*years?\s+(?:of\s+)?experience',
+            r'experience[:\s]+(\d+)[\+\-\s]*years?',
+            r'(\d+)[\+\-\s]*yrs?\s+(?:of\s+)?experience'
+        ]
+        
+        years_experience = []
+        for pattern in experience_patterns:
+            matches = re.findall(pattern, text.lower())
+            years_experience.extend([int(match) for match in matches])
+        
+        # Count action verbs usage
+        action_verb_count = 0
+        for verb in self.action_verbs:
+            action_verb_count += len(re.findall(rf'\b{verb}\w*', text.lower()))
+        
+        # Look for quantified achievements
+        number_patterns = [
+            r'\d+%', r'\$\d+', r'\d+k', r'\d+m', r'\d+\s*million',
+            r'\d+\s*thousand', r'increased.*?\d+', r'reduced.*?\d+',
+            r'improved.*?\d+', r'grew.*?\d+'
+        ]
+        
+        quantified_achievements = 0
+        for pattern in number_patterns:
+            quantified_achievements += len(re.findall(pattern, text.lower()))
+        
+        return {
+            'estimated_years': max(years_experience) if years_experience else 0,
+            'action_verbs_count': action_verb_count,
+            'quantified_achievements': quantified_achievements,
+            'has_leadership_keywords': any(keyword in text.lower() 
+                                         for keyword in ['led', 'managed', 'supervised', 'mentored', 'coordinated'])
+        }
+    
+    def analyze_education(self, text: str) -> Dict:
+        """Analyze education section"""
+        education_keywords = [
+            'bachelor', 'master', 'phd', 'doctorate', 'degree', 'university',
+            'college', 'institute', 'certification', 'diploma'
+        ]
+        
+        education_mentions = []
+        for keyword in education_keywords:
+            if keyword in text.lower():
+                education_mentions.append(keyword)
+        
+        # Look for GPA mentions
+        gpa_pattern = r'gpa[:\s]*(\d+\.\d+)'
+        gpa_matches = re.findall(gpa_pattern, text.lower())
+        
+        return {
+            'education_keywords': education_mentions,
+            'gpa_mentioned': len(gpa_matches) > 0,
+            'gpa_values': gpa_matches
+        }
+    
+    def calculate_ats_score(self, text: str) -> Dict:
+        """Calculate ATS compatibility score"""
+        score = 10
+        issues = []
+        
+        # Check for problematic formatting
+        if len(re.findall(r'[^\x00-\x7F]', text)) > 10:
+            score -= 1
+            issues.append("Contains special characters that may cause parsing issues")
+        
+        # Check for standard sections
+        required_sections = ['experience', 'education', 'skills']
+        section_score = 0
+        for section in required_sections:
+            if section in text.lower():
+                section_score += 1
+        
+        if section_score < 2:
+            score -= 2
+            issues.append("Missing standard resume sections")
+        
+        # Check for contact information
+        contact_info = self.extract_contact_info(text)
+        if not contact_info['emails']:
+            score -= 1
+            issues.append("Missing email address")
+        
+        # Check readability
+        readability = textstat.flesch_reading_ease(text)
+        if readability < 30:
+            score -= 1
+            issues.append("Text may be too complex for ATS parsing")
+        
+        return {
+            'score': max(0, score),
+            'issues': issues,
+            'readability': readability
+        }
+    
+    def compare_with_job_description(self, resume_text: str, job_description: str) -> Dict:
+        """Compare resume with job description using TF-IDF similarity"""
+        if not job_description.strip():
+            return {'similarity_score': 0, 'missing_keywords': [], 'matching_keywords': []}
+        
+        # Preprocess texts
+        def preprocess(text):
+            text = re.sub(r'[^\w\s]', ' ', text.lower())
+            tokens = word_tokenize(text)
+            stop_words = set(stopwords.words('english'))
+            return ' '.join([word for word in tokens if word not in stop_words and len(word) > 2])
+        
+        resume_processed = preprocess(resume_text)
+        job_processed = preprocess(job_description)
+        
+        # Calculate TF-IDF similarity
+        vectorizer = TfidfVectorizer(max_features=1000, ngram_range=(1, 2))
+        tfidf_matrix = vectorizer.fit_transform([resume_processed, job_processed])
+        similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+        
+        # Extract important keywords from job description
+        job_words = Counter(job_processed.split())
+        important_job_keywords = [word for word, count in job_words.most_common(20) if count > 1]
+        
+        # Find matching and missing keywords
+        resume_words = set(resume_processed.split())
+        matching_keywords = [kw for kw in important_job_keywords if kw in resume_words]
+        missing_keywords = [kw for kw in important_job_keywords if kw not in resume_words]
+        
+        return {
+            'similarity_score': round(similarity * 100, 2),
+            'matching_keywords': matching_keywords,
+            'missing_keywords': missing_keywords[:10]  # Top 10 missing keywords
+        }
+    
+    def generate_recommendations(self, analysis_result: Dict) -> Dict:
+        """Generate improvement recommendations based on analysis"""
+        recommendations = {
+            'immediate_actions': [],
+            'short_term_goals': [],
+            'long_term_development': []
+        }
+        
+        # Immediate actions
+        if analysis_result['ats_compatibility']['score'] < 8:
+            recommendations['immediate_actions'].extend([
+                "Improve resume formatting for better ATS compatibility",
+                "Add missing contact information",
+                "Use standard section headings (Experience, Education, Skills)"
+            ])
+        
+        if analysis_result['experience']['action_verbs_count'] < 5:
+            recommendations['immediate_actions'].append(
+                "Add more action verbs to describe your achievements"
+            )
+        
+        if analysis_result['experience']['quantified_achievements'] < 3:
+            recommendations['immediate_actions'].append(
+                "Quantify your achievements with numbers, percentages, or dollar amounts"
+            )
+        
+        # Short-term goals
+        missing_skills = analysis_result.get('missing_skills', [])
+        if missing_skills:
+            recommendations['short_term_goals'].append(
+                f"Learn these in-demand skills: {', '.join(missing_skills[:5])}"
+            )
+        
+        if not analysis_result['experience']['has_leadership_keywords']:
+            recommendations['short_term_goals'].append(
+                "Gain leadership experience and highlight it on your resume"
+            )
+        
+        # Long-term development
+        recommendations['long_term_development'].extend([
+            "Pursue relevant certifications in your field",
+            "Build a portfolio of projects to showcase your skills",
+            "Attend industry conferences and networking events",
+            "Consider advanced education or specialized training"
+        ])
+        
+        return recommendations
     
     def analyze_resume_comprehensively(self, resume_text: str, job_description: str = "") -> Dict:
-        """Comprehensive resume analysis using Gemini AI"""
+        """Perform comprehensive resume analysis"""
         
-        if self.model is None:
-            return self._get_fallback_analysis()
+        # Basic text analysis
+        word_count = len(resume_text.split())
+        sentence_count = len(sent_tokenize(resume_text))
         
-        analysis_prompt = f"""
-        As an expert career counselor and resume analyst, provide a comprehensive analysis of the following resume. 
+        # Extract various components
+        contact_info = self.extract_contact_info(resume_text)
+        skills = self.extract_skills(resume_text)
+        experience = self.analyze_experience(resume_text)
+        education = self.analyze_education(resume_text)
+        ats_analysis = self.calculate_ats_score(resume_text)
         
-        RESUME CONTENT:
-        {resume_text}
+        # Job comparison if provided
+        job_match = self.compare_with_job_description(resume_text, job_description)
         
-        JOB DESCRIPTION (if provided):
-        {job_description}
+        # Calculate overall scores
+        strength_score = min(10, (
+            (len(skills['technical']) * 2) +
+            len(skills['soft']) +
+            (experience['action_verbs_count'] * 0.5) +
+            (experience['quantified_achievements'] * 0.5) +
+            (3 if contact_info['emails'] else 0)
+        ) / 2)
         
-        Please provide a detailed JSON response with the following structure:
+        readability_score = min(10, ats_analysis['readability'] / 10)
         
-        {{
-            "overall_assessment": {{
-                "strength_score": "1-10 rating",
-                "readability_score": "1-10 rating", 
-                "ats_compatibility": "1-10 rating",
-                "summary": "Brief overall assessment"
-            }},
-            "strengths": [
-                "List of resume strengths"
-            ],
-            "weaknesses": [
-                "List of areas needing improvement"
-            ],
-            "missing_skills": [
-                "Skills mentioned in job description but missing from resume"
-            ],
-            "skill_gaps": {{
-                "technical_skills": ["specific technical skills to develop"],
-                "soft_skills": ["soft skills to improve"],
-                "certifications": ["relevant certifications to pursue"],
-                "experience_areas": ["types of experience to gain"]
-            }},
-            "improvement_suggestions": {{
-                "immediate_actions": [
-                    "Actions to take in next 1-2 weeks"
-                ],
-                "short_term_goals": [
-                    "Goals for next 1-3 months"
-                ],
-                "long_term_development": [
-                    "Development plans for 3-12 months"
-                ]
-            }},
-            "resume_optimization": {{
-                "format_improvements": ["specific formatting suggestions"],
-                "content_enhancements": ["content improvement suggestions"],
-                "keyword_optimization": ["important keywords to include"],
-                "section_recommendations": ["sections to add/modify"]
-            }},
-            "career_guidance": {{
-                "recommended_roles": ["job roles that match current skills"],
-                "career_progression": ["potential career advancement paths"],
-                "skill_development_priority": ["ranked list of skills to develop first"],
-                "networking_suggestions": ["professional networking recommendations"]
-            }},
-            "learning_resources": {{
-                "online_courses": [
-                    {{"platform": "course platform", "course": "course name", "skill": "target skill", "duration": "time estimate", "priority": "high/medium/low"}}
-                ],
-                "certifications": [
-                    {{"certification": "cert name", "provider": "issuing body", "relevance": "why important", "timeline": "time to complete"}}
-                ],
-                "books_resources": [
-                    {{"title": "resource title", "type": "book/blog/website", "focus_area": "skill area"}}
-                ],
-                "practical_projects": [
-                    {{"project": "project idea", "skills_developed": ["skills"], "timeline": "completion time"}}
-                ]
-            }},
-            "interview_preparation": {{
-                "likely_questions": ["potential interview questions based on role"],
-                "skill_demonstration": ["how to showcase skills in interview"],
-                "portfolio_suggestions": ["what to include in portfolio"]
-            }}
-        }}
+        # Generate strengths and weaknesses
+        strengths = []
+        weaknesses = []
         
-        Provide specific, actionable, and personalized recommendations. Focus on practical steps the person can take to improve their career prospects.
-        """
+        if len(skills['technical']) > 0:
+            strengths.append(f"Strong technical skill set with {sum(len(v) for v in skills['technical'].values())} technical skills identified")
         
-        try:
-            response = safe_generate_content(self.model, analysis_prompt)
-            if response is None:
-                return self._get_fallback_analysis()
-            
-            # Extract JSON from response
-            response_text = response.text
-            
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                analysis_result = json.loads(json_match.group())
-                return analysis_result
-            else:
-                # If JSON extraction fails, return structured response
-                return self._parse_text_response(response_text)
-                
-        except Exception as e:
-            print(f"Error with Gemini API: {str(e)}")
-            return self._get_fallback_analysis()
-    
-    def generate_personalized_learning_path(self, skills_analysis: Dict, career_goals: str = "") -> Dict:
-        """Generate personalized learning path using Gemini"""
+        if experience['quantified_achievements'] > 2:
+            strengths.append("Good use of quantified achievements to demonstrate impact")
         
-        if self.model is None:
-            return {"learning_path": "AI model not available for learning path generation."}
+        if experience['action_verbs_count'] > 8:
+            strengths.append("Excellent use of action verbs to describe responsibilities")
         
-        learning_prompt = f"""
-        Based on the following skill analysis, create a detailed learning path:
+        if contact_info['linkedin'] or contact_info['github']:
+            strengths.append("Professional online presence with LinkedIn/GitHub profiles")
         
-        SKILL ANALYSIS:
-        {json.dumps(skills_analysis, indent=2)}
+        # Weaknesses
+        if len(skills['technical']) == 0:
+            weaknesses.append("Limited technical skills mentioned")
         
-        CAREER GOALS:
-        {career_goals}
+        if experience['quantified_achievements'] < 2:
+            weaknesses.append("Lacks quantified achievements and measurable results")
         
-        Create a comprehensive learning path with:
+        if experience['action_verbs_count'] < 5:
+            weaknesses.append("Could use more dynamic action verbs")
         
-        1. IMMEDIATE PRIORITIES (Next 4 weeks):
-        - Top 2 skills to focus on
-        - Specific daily/weekly actions
-        - Resources to start immediately
+        if word_count < 300:
+            weaknesses.append("Resume appears to be too brief")
+        elif word_count > 1000:
+            weaknesses.append("Resume may be too lengthy")
         
-        2. SHORT-TERM DEVELOPMENT (1-3 months):
-        - Skills to develop
-        - Projects to complete
-        - Certifications to pursue
+        # Generate recommendations
+        recommendations = self.generate_recommendations({
+            'ats_compatibility': ats_analysis,
+            'experience': experience,
+            'missing_skills': job_match.get('missing_keywords', [])
+        })
         
-        3. MEDIUM-TERM GOALS (3-6 months):
-        - Advanced skills development
-        - Professional experiences to gain
-        - Network building activities
-        
-        4. LONG-TERM VISION (6-12 months):
-        - Career advancement targets
-        - Leadership skills development
-        - Industry expertise building
-        
-        For each recommendation, include:
-        - Specific resources (courses, books, platforms)
-        - Time investment required
-        - Success metrics
-        - How it contributes to career goals
-        
-        Format as a practical, actionable roadmap.
-        """
-        
-        try:
-            response = self.model.generate_content(learning_prompt)
-            return {"learning_path": response.text}
-        except Exception as e:
-            print(f"Error generating learning path: {str(e)}")
-            return {"learning_path": "Unable to generate personalized learning path at this time."}
-    
-    def get_industry_insights(self, job_description: str, resume_text: str) -> Dict:
-        """Get industry-specific insights and trends"""
-        
-        if self.model is None:
-            return {"industry_insights": "AI model not available for industry insights."}
-        
-        insights_prompt = f"""
-        Based on this job description and resume, provide industry insights:
-        
-        JOB DESCRIPTION:
-        {job_description}
-        
-        RESUME:
-        {resume_text}
-        
-        Provide insights on:
-        
-        1. Industry Trends:
-        - Current hot skills in this field
-        - Emerging technologies to watch
-        - Skills becoming obsolete
-        
-        2. Salary Expectations:
-        - Typical salary ranges for this role
-        - Factors that influence compensation
-        - Geographic considerations
-        
-        3. Career Progression:
-        - Typical career paths in this field
-        - Skills needed for advancement
-        - Timeline for career growth
-        
-        4. Market Demand:
-        - Job market outlook
-        - Companies actively hiring
-        - Remote work opportunities
-        
-        5. Professional Development:
-        - Key conferences/events to attend
-        - Professional organizations to join
-        - Thought leaders to follow
-        
-        Keep insights current and actionable.
-        """
-        
-        try:
-            response = self.model.generate_content(insights_prompt)
-            return {"industry_insights": response.text}
-        except Exception as e:
-            print(f"Error getting industry insights: {str(e)}")
-            return {"industry_insights": "Unable to fetch industry insights at this time."}
-    
-    def _parse_text_response(self, response_text: str) -> Dict:
-        """Parse text response when JSON extraction fails"""
         return {
             "overall_assessment": {
-                "summary": "AI analysis completed - see detailed feedback below",
-                "strength_score": "7",
-                "readability_score": "7",
-                "ats_compatibility": "7"
+                "strength_score": round(strength_score, 1),
+                "readability_score": round(readability_score, 1),
+                "ats_compatibility": ats_analysis['score'],
+                "summary": f"Resume analysis complete. Identified {sum(len(v) for v in skills['technical'].values())} technical skills and {len(skills['soft'])} soft skills."
             },
-            "detailed_analysis": response_text,
-            "strengths": ["Analysis provided by AI"],
-            "weaknesses": ["See detailed analysis"],
-            "improvement_suggestions": {
-                "immediate_actions": ["Review detailed AI analysis"],
-                "short_term_goals": ["Follow AI recommendations"],
-                "long_term_development": ["Implement suggested improvements"]
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "skills_analysis": {
+                "technical_skills": skills['technical'],
+                "soft_skills": skills['soft'],
+                "total_technical": sum(len(v) for v in skills['technical'].values()),
+                "total_soft": len(skills['soft'])
+            },
+            "experience_analysis": experience,
+            "contact_info": contact_info,
+            "ats_compatibility": ats_analysis,
+            "job_match": job_match,
+            "improvement_suggestions": recommendations,
+            "resume_stats": {
+                "word_count": word_count,
+                "sentence_count": sentence_count,
+                "readability": ats_analysis['readability']
             }
         }
+
+
+class TextAnalysisResumeAnalyzer:
+    """Alternative analyzer using pure text analysis and pattern matching"""
     
-    def _get_fallback_analysis(self) -> Dict:
-        """Fallback analysis when API fails"""
+    def __init__(self):
+        self.skill_database = self._load_skill_database()
+        self.industry_keywords = self._load_industry_keywords()
+    
+    def _load_skill_database(self) -> Dict:
+        """Load comprehensive skill database"""
+        return {
+            'programming': [
+                'python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'php', 'ruby',
+                'go', 'rust', 'swift', 'kotlin', 'scala', 'r', 'matlab', 'sql', 'html',
+                'css', 'bash', 'powershell', 'perl', 'assembly'
+            ],
+            'frameworks_libraries': [
+                'react', 'angular', 'vue', 'nodejs', 'express', 'django', 'flask',
+                'spring', 'laravel', 'rails', 'bootstrap', 'jquery', 'nextjs', 'nuxt',
+                'svelte', 'ember', 'backbone', 'meteor', 'gatsby'
+            ],
+            'databases': [
+                'mysql', 'postgresql', 'mongodb', 'redis', 'sqlite', 'oracle',
+                'cassandra', 'elasticsearch', 'neo4j', 'dynamodb', 'firebase',
+                'influxdb', 'couchdb'
+            ],
+            'cloud_devops': [
+                'aws', 'azure', 'gcp', 'google cloud', 'docker', 'kubernetes',
+                'jenkins', 'git', 'github', 'gitlab', 'bitbucket', 'ansible',
+                'terraform', 'chef', 'puppet', 'nagios', 'prometheus'
+            ],
+            'data_science_ml': [
+                'pandas', 'numpy', 'scikit-learn', 'tensorflow', 'pytorch', 'keras',
+                'matplotlib', 'seaborn', 'plotly', 'jupyter', 'r studio', 'tableau',
+                'power bi', 'apache spark', 'hadoop', 'kafka'
+            ],
+            'design_tools': [
+                'photoshop', 'illustrator', 'figma', 'sketch', 'indesign',
+                'after effects', 'premiere pro', 'canva', 'adobe xd'
+            ],
+            'soft_skills': [
+                'leadership', 'teamwork', 'communication', 'problem solving',
+                'analytical thinking', 'creativity', 'adaptability', 'time management',
+                'project management', 'collaboration', 'mentoring', 'presentation',
+                'negotiation', 'critical thinking', 'decision making'
+            ]
+        }
+    
+    def _load_industry_keywords(self) -> Dict:
+        """Load industry-specific keywords"""
+        return {
+            'software_development': [
+                'agile', 'scrum', 'ci/cd', 'api', 'microservices', 'responsive design',
+                'user experience', 'debugging', 'testing', 'deployment'
+            ],
+            'data_science': [
+                'machine learning', 'data analysis', 'statistics', 'data visualization',
+                'big data', 'predictive modeling', 'deep learning', 'neural networks'
+            ],
+            'marketing': [
+                'seo', 'sem', 'content marketing', 'social media', 'email marketing',
+                'analytics', 'conversion optimization', 'brand management'
+            ],
+            'finance': [
+                'financial analysis', 'budgeting', 'forecasting', 'risk management',
+                'compliance', 'audit', 'investment', 'portfolio management'
+            ]
+        }
+    
+    def extract_skills_advanced(self, text: str) -> Dict:
+        """Advanced skill extraction with context awareness"""
+        text_lower = text.lower()
+        extracted_skills = {}
+        
+        for category, skills in self.skill_database.items():
+            found_skills = []
+            for skill in skills:
+                # Use word boundaries to avoid partial matches
+                pattern = rf'\b{re.escape(skill)}\b'
+                if re.search(pattern, text_lower):
+                    found_skills.append(skill)
+            
+            if found_skills:
+                extracted_skills[category] = found_skills
+        
+        return extracted_skills
+    
+    def analyze_resume_structure(self, text: str) -> Dict:
+        """Analyze resume structure and format"""
+        sections = {
+            'contact': False,
+            'summary': False,
+            'experience': False,
+            'education': False,
+            'skills': False,
+            'projects': False
+        }
+        
+        section_patterns = {
+            'contact': r'(email|phone|address|linkedin)',
+            'summary': r'(summary|profile|objective|about)',
+            'experience': r'(experience|employment|work history|professional)',
+            'education': r'(education|degree|university|college)',
+            'skills': r'(skills|competencies|technologies)',
+            'projects': r'(projects|portfolio|work samples)'
+        }
+        
+        for section, pattern in section_patterns.items():
+            if re.search(pattern, text.lower()):
+                sections[section] = True
+        
+        return sections
+    
+    def calculate_keyword_density(self, text: str, keywords: List[str]) -> Dict:
+        """Calculate keyword density for given keywords"""
+        text_lower = text.lower()
+        word_count = len(text.split())
+        
+        keyword_counts = {}
+        for keyword in keywords:
+            count = len(re.findall(rf'\b{re.escape(keyword)}\b', text_lower))
+            density = (count / word_count) * 100 if word_count > 0 else 0
+            keyword_counts[keyword] = {
+                'count': count,
+                'density': round(density, 2)
+            }
+        
+        return keyword_counts
+    
+    def generate_skill_recommendations(self, current_skills: Dict, target_role: str = "") -> List[str]:
+        """Generate skill recommendations based on current skills and target role"""
+        all_current_skills = []
+        for category_skills in current_skills.values():
+            all_current_skills.extend(category_skills)
+        
+        recommendations = []
+        
+        # General recommendations based on missing popular skills
+        popular_skills = {
+            'programming': ['python', 'javascript', 'sql'],
+            'cloud_devops': ['aws', 'docker', 'git'],
+            'data_science_ml': ['pandas', 'numpy', 'matplotlib'],
+            'soft_skills': ['leadership', 'communication', 'problem solving']
+        }
+        
+        for category, skills in popular_skills.items():
+            missing_skills = [skill for skill in skills if skill not in all_current_skills]
+            if missing_skills:
+                recommendations.extend(missing_skills[:2])  # Top 2 missing skills per category
+        
+        return recommendations[:10]  # Return top 10 recommendations
+    
+    def analyze_resume_comprehensively(self, resume_text: str, job_description: str = "") -> Dict:
+        """Comprehensive analysis using text processing techniques"""
+        
+        # Extract skills
+        skills = self.extract_skills_advanced(resume_text)
+        
+        # Analyze structure
+        structure = self.analyze_resume_structure(resume_text)
+        
+        # Basic statistics
+        word_count = len(resume_text.split())
+        char_count = len(resume_text)
+        
+        # Calculate scores
+        skill_score = min(10, len([skill for skills_list in skills.values() for skill in skills_list]) * 0.5)
+        structure_score = sum(structure.values()) * 1.67  # 6 sections max, so 1.67 per section for 10 points
+        length_score = 10 if 300 <= word_count <= 800 else (8 if word_count > 200 else 5)
+        
+        overall_score = (skill_score + structure_score + length_score) / 3
+        
+        # Generate insights
+        strengths = []
+        weaknesses = []
+        
+        if len(skills) >= 3:
+            strengths.append(f"Diverse skill set across {len(skills)} categories")
+        
+        if structure['experience'] and structure['education']:
+            strengths.append("Well-structured resume with key sections")
+        
+        if word_count >= 400:
+            strengths.append("Appropriate resume length with sufficient detail")
+        
+        # Weaknesses
+        if len(skills) < 2:
+            weaknesses.append("Limited skill diversity - consider adding more technical skills")
+        
+        if not structure['contact']:
+            weaknesses.append("Missing clear contact information")
+        
+        if word_count < 300:
+            weaknesses.append("Resume appears too brief - add more detail about your experience")
+        
+        # Recommendations
+        skill_recommendations = self.generate_skill_recommendations(skills)
+        
         return {
             "overall_assessment": {
-                "summary": "Unable to connect to AI analysis service",
-                "strength_score": "N/A",
-                "readability_score": "N/A", 
-                "ats_compatibility": "N/A"
+                "strength_score": round(overall_score, 1),
+                "readability_score": round(length_score, 1),
+                "ats_compatibility": round(structure_score, 1),
+                "summary": f"Analysis complete. Found {sum(len(v) for v in skills.values())} total skills across {len(skills)} categories."
             },
-            "strengths": ["Resume uploaded successfully"],
-            "weaknesses": ["AI analysis temporarily unavailable"],
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "skills_analysis": skills,
+            "structure_analysis": structure,
             "improvement_suggestions": {
-                "immediate_actions": ["Try analysis again later"],
-                "short_term_goals": ["Review resume manually"],
-                "long_term_development": ["Consider professional resume review"]
+                "immediate_actions": [
+                    "Review and update contact information",
+                    "Ensure all major resume sections are present",
+                    "Add missing skills to your skill section"
+                ],
+                "short_term_goals": [
+                    f"Learn these recommended skills: {', '.join(skill_recommendations[:5])}",
+                    "Add quantifiable achievements to experience section",
+                    "Optimize resume length and formatting"
+                ],
+                "long_term_development": [
+                    "Pursue relevant certifications",
+                    "Build projects to demonstrate skills",
+                    "Gain experience in trending technologies"
+                ]
             },
-            "error": "API service unavailable"
+            "recommended_skills": skill_recommendations,
+            "resume_stats": {
+                "word_count": word_count,
+                "character_count": char_count,
+                "sections_present": sum(structure.values()),
+                "total_skills_found": sum(len(v) for v in skills.values())
+            }
         }
 
-# Simplified configuration function
-def get_gemini_api_key():
-    """Get Gemini API key - now uses hardcoded key"""
-    return GEMINI_API_KEY
 
 def extract_text_from_resume_file(file_content, file_extension):
     """Extract text from uploaded resume file"""
@@ -3785,15 +4065,11 @@ def extract_text_from_resume_file(file_content, file_extension):
     except Exception as e:
         return f"Error extracting text: {str(e)}"
 
-def display_gemini_analysis_results(analysis_result: Dict, learning_path: Dict = None, industry_insights: Dict = None):
-    """Display comprehensive Gemini analysis results"""
+
+def display_analysis_results(analysis_result: Dict):
+    """Display comprehensive analysis results"""
     
-    # Overall Assessment
-    st.markdown("## 🔍 AI-Powered Resume Analysis")
-    
-    if "error" in analysis_result:
-        st.error("AI analysis service is currently unavailable. Please try again later.")
-        return
+    st.markdown("## 📊 Resume Analysis Results")
     
     # Score Dashboard
     col1, col2, col3 = st.columns(3)
@@ -3810,71 +4086,66 @@ def display_gemini_analysis_results(analysis_result: Dict, learning_path: Dict =
     
     with col3:
         ats_score = overall.get("ats_compatibility", "N/A")
-        st.metric("ATS Compatibility", f"{ats_score}/10" if ats_score != "N/A" else "N/A")
+        st.metric("Structure Score", f"{ats_score}/10" if ats_score != "N/A" else "N/A")
     
     # Summary
     if overall.get("summary"):
         st.info(overall["summary"])
     
     # Create tabs for different sections
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Strengths & Gaps", 
-        "🎯 Improvement Plan", 
-        "📚 Learning Resources",
-        "🚀 Career Guidance",
-        "📝 Resume Optimization",
-        "🎤 Interview Prep"
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 Strengths & Areas", 
+        "🛠️ Skills Analysis", 
+        "📋 Improvement Plan",
+        "📊 Statistics"
     ])
     
     with tab1:
-        st.subheader("Resume Strengths")
-        strengths = analysis_result.get("strengths", [])
-        for strength in strengths:
-            st.success(f"✅ {strength}")
+        col1, col2 = st.columns(2)
         
-        st.subheader("Areas for Improvement")
-        weaknesses = analysis_result.get("weaknesses", [])
-        for weakness in weaknesses:
-            st.warning(f"⚠️ {weakness}")
+        with col1:
+            st.subheader("✅ Strengths")
+            strengths = analysis_result.get("strengths", [])
+            for strength in strengths:
+                st.success(strength)
         
-        # Skill gaps breakdown
-        skill_gaps = analysis_result.get("skill_gaps", {})
-        if skill_gaps:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Technical Skills to Develop")
-                tech_skills = skill_gaps.get("technical_skills", [])
-                for skill in tech_skills:
-                    st.write(f"• {skill}")
-                
-                st.subheader("Certifications to Pursue")
-                certs = skill_gaps.get("certifications", [])
-                for cert in certs:
-                    st.write(f"🏆 {cert}")
-            
-            with col2:
-                st.subheader("Soft Skills to Improve")
-                soft_skills = skill_gaps.get("soft_skills", [])
-                for skill in soft_skills:
-                    st.write(f"• {skill}")
-                
-                st.subheader("Experience Areas")
-                exp_areas = skill_gaps.get("experience_areas", [])
-                for area in exp_areas:
-                    st.write(f"💼 {area}")
+        with col2:
+            st.subheader("⚠️ Areas for Improvement")
+            weaknesses = analysis_result.get("weaknesses", [])
+            for weakness in weaknesses:
+                st.warning(weakness)
     
     with tab2:
-        st.subheader("Your Personalized Improvement Plan")
+        st.subheader("🎯 Skills Analysis")
+        
+        skills_analysis = analysis_result.get("skills_analysis", {})
+        
+        if isinstance(skills_analysis, dict):
+            for category, skills in skills_analysis.items():
+                if isinstance(skills, list) and skills:
+                    st.write(f"**{category.replace('_', ' ').title()}:**")
+                    for skill in skills:
+                        st.write(f"  • {skill}")
+                    st.write("")
+        
+        # Recommended skills
+        recommended_skills = analysis_result.get("recommended_skills", [])
+        if recommended_skills:
+            st.subheader("💡 Recommended Skills to Learn")
+            for skill in recommended_skills:
+                st.write(f"🎯 {skill}")
+    
+    with tab3:
+        st.subheader("🚀 Improvement Roadmap")
         
         improvements = analysis_result.get("improvement_suggestions", {})
         
-        st.markdown("### 🚀 Immediate Actions (Next 1-2 weeks)")
+        st.markdown("### ⚡ Immediate Actions")
         immediate = improvements.get("immediate_actions", [])
         for action in immediate:
             st.write(f"1. {action}")
         
-        st.markdown("### ⏰ Short-term Goals (1-3 months)")
+        st.markdown("### 📅 Short-term Goals (1-3 months)")
         short_term = improvements.get("short_term_goals", [])
         for goal in short_term:
             st.write(f"• {goal}")
@@ -3883,213 +4154,150 @@ def display_gemini_analysis_results(analysis_result: Dict, learning_path: Dict =
         long_term = improvements.get("long_term_development", [])
         for goal in long_term:
             st.write(f"• {goal}")
-        
-        # Display learning path if available
-        if learning_path and learning_path.get("learning_path"):
-            st.markdown("### 📋 Detailed Learning Roadmap")
-            st.markdown(learning_path["learning_path"])
-    
-    with tab3:
-        st.subheader("Curated Learning Resources")
-        
-        resources = analysis_result.get("learning_resources", {})
-        
-        # Online Courses
-        courses = resources.get("online_courses", [])
-        if courses:
-            st.markdown("### 💻 Recommended Online Courses")
-            for course in courses:
-                with st.expander(f"{course.get('course', 'Course')} - {course.get('priority', 'Medium')} Priority"):
-                    st.write(f"**Platform:** {course.get('platform', 'N/A')}")
-                    st.write(f"**Target Skill:** {course.get('skill', 'N/A')}")
-                    st.write(f"**Duration:** {course.get('duration', 'N/A')}")
-        
-        # Certifications
-        certifications = resources.get("certifications", [])
-        if certifications:
-            st.markdown("### 🏆 Certification Recommendations")
-            for cert in certifications:
-                st.write(f"**{cert.get('certification', 'Certification')}**")
-                st.write(f"Provider: {cert.get('provider', 'N/A')}")
-                st.write(f"Relevance: {cert.get('relevance', 'N/A')}")
-                st.write(f"Timeline: {cert.get('timeline', 'N/A')}")
-                st.write("---")
-        
-        # Books and Resources
-        books = resources.get("books_resources", [])
-        if books:
-            st.markdown("### 📚 Reading List")
-            for book in books:
-                st.write(f"• **{book.get('title', 'Resource')}** ({book.get('type', 'Resource')})")
-                st.write(f"  Focus: {book.get('focus_area', 'General')}")
-        
-        # Practical Projects
-        projects = resources.get("practical_projects", [])
-        if projects:
-            st.markdown("### 🛠️ Hands-on Projects")
-            for project in projects:
-                st.write(f"**Project:** {project.get('project', 'Project')}")
-                st.write(f"Skills: {', '.join(project.get('skills_developed', []))}")
-                st.write(f"Timeline: {project.get('timeline', 'N/A')}")
-                st.write("---")
     
     with tab4:
-        st.subheader("Career Development Guidance")
+        st.subheader("📈 Resume Statistics")
         
-        career = analysis_result.get("career_guidance", {})
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 💼 Recommended Job Roles")
-            roles = career.get("recommended_roles", [])
-            for role in roles:
-                st.write(f"• {role}")
-            
-            st.markdown("### 📈 Career Progression Paths")
-            progression = career.get("career_progression", [])
-            for path in progression:
-                st.write(f"• {path}")
-        
-        with col2:
-            st.markdown("### 🎯 Skill Development Priority")
-            priorities = career.get("skill_development_priority", [])
-            for i, skill in enumerate(priorities, 1):
-                st.write(f"{i}. {skill}")
-            
-            st.markdown("### 🤝 Networking Suggestions")
-            networking = career.get("networking_suggestions", [])
-            for suggestion in networking:
-                st.write(f"• {suggestion}")
-        
-        # Display industry insights if available
-        if industry_insights and industry_insights.get("industry_insights"):
-            st.markdown("### 🌟 Industry Insights & Trends")
-            st.markdown(industry_insights["industry_insights"])
-    
-    with tab5:
-        st.subheader("Resume Optimization Tips")
-        
-        optimization = analysis_result.get("resume_optimization", {})
+        stats = analysis_result.get("resume_stats", {})
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 🎨 Format Improvements")
-            format_tips = optimization.get("format_improvements", [])
-            for tip in format_tips:
-                st.write(f"• {tip}")
-            
-            st.markdown("### 🔑 Keyword Optimization")
-            keywords = optimization.get("keyword_optimization", [])
-            for keyword in keywords:
-                st.write(f"• {keyword}")
+            st.metric("Word Count", stats.get("word_count", "N/A"))
+            st.metric("Total Skills Found", stats.get("total_skills_found", "N/A"))
         
         with col2:
-            st.markdown("### ✏️ Content Enhancements")
-            content = optimization.get("content_enhancements", [])
-            for enhancement in content:
-                st.write(f"• {enhancement}")
+            st.metric("Character Count", stats.get("character_count", "N/A"))
+            st.metric("Sections Present", stats.get("sections_present", "N/A"))
+        
+        # Structure analysis if available
+        structure = analysis_result.get("structure_analysis", {})
+        if structure:
+            st.subheader("📋 Resume Structure")
+            for section, present in structure.items():
+                status = "✅" if present else "❌"
+                st.write(f"{status} {section.replace('_', ' ').title()}")
+        
+        # Job match analysis if available
+        job_match = analysis_result.get("job_match", {})
+        if job_match and job_match.get('similarity_score', 0) > 0:
+            st.subheader("🎯 Job Match Analysis")
+            st.metric("Similarity Score", f"{job_match.get('similarity_score', 0)}%")
             
-            st.markdown("### 📋 Section Recommendations")
-            sections = optimization.get("section_recommendations", [])
-            for section in sections:
-                st.write(f"• {section}")
-    
-    with tab6:
-        st.subheader("Interview Preparation")
-        
-        interview = analysis_result.get("interview_preparation", {})
-        
-        st.markdown("### ❓ Likely Interview Questions")
-        questions = interview.get("likely_questions", [])
-        for question in questions:
-            st.write(f"• {question}")
-        
-        st.markdown("### 🎯 How to Demonstrate Your Skills")
-        demonstrations = interview.get("skill_demonstration", [])
-        for demo in demonstrations:
-            st.write(f"• {demo}")
-        
-        st.markdown("### 📁 Portfolio Suggestions")
-        portfolio = interview.get("portfolio_suggestions", [])
-        for suggestion in portfolio:
-            st.write(f"• {suggestion}")
+            matching_keywords = job_match.get('matching_keywords', [])
+            missing_keywords = job_match.get('missing_keywords', [])
+            
+            if matching_keywords:
+                st.write("**Matching Keywords:**", ", ".join(matching_keywords[:10]))
+            
+            if missing_keywords:
+                st.write("**Missing Keywords:**", ", ".join(missing_keywords[:10]))
     
     # Export functionality
     st.markdown("---")
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("📧 Email Analysis Report"):
-            st.info("Email functionality coming soon!")
-    
-    with col2:
         # Create downloadable report
         report_data = {
             "analysis_date": datetime.now().isoformat(),
-            "analysis_result": analysis_result,
-            "learning_path": learning_path,
-            "industry_insights": industry_insights
+            "analysis_result": analysis_result
         }
         
         report_json = json.dumps(report_data, indent=2)
         st.download_button(
-            label="📥 Download Full Report",
+            label="📥 Download Analysis Report",
             data=report_json,
-            file_name=f"ai_resume_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            file_name=f"resume_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json"
         )
-
-def enhanced_individual_analysis_page():
-    """Enhanced individual analysis page with Gemini AI - no manual API key required"""
-    st.markdown('<h1 class="main-header">AI-Powered Resume Analysis</h1>', unsafe_allow_html=True)
-    
-    # Initialize analyzer with hardcoded API key
-    try:
-        with st.spinner("Initializing AI analyzer..."):
-            analyzer = GeminiResumeAnalyzer()  # No need to pass API key
-            if analyzer.model is None:
-                st.error("Failed to initialize AI model. Please check your API key configuration.")
-                return
-            st.success("AI analyzer ready!")
-    except Exception as e:
-        st.error(f"Error initializing AI analyzer: {str(e)}")
-        st.info("Please check your API key configuration in the code.")
-        return
-    
-    # Get data from database
-    jobs = get_job_descriptions()
-    if st.session_state.user_role == "student":
-        resumes = get_user_resumes(st.session_state.user_id)
-    else:
-        resumes = get_user_resumes()
-    
-    if not resumes:
-        st.warning("No resumes available for analysis")
-        return
-    
-    # File selection
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📄 Select Resume")
-        if st.session_state.user_role == "student":
-            resume_options = {f"{resume[1]} - {resume[2]}": resume[0] for resume in resumes}
-        else:
-            resume_options = {f"{resume[1]} ({resume[4]}) - {resume[2]}": resume[0] for resume in resumes}
-        
-        selected_resume = st.selectbox("Choose a resume", list(resume_options.keys()))
-        selected_resume_id = resume_options.get(selected_resume)
     
     with col2:
-        st.subheader("💼 Select Job (Optional)")
-        job_options = {"No specific job": None}
-        if jobs:
-            job_options.update({f"{job[1]} - {job[2]}": job[0] for job in jobs})
+        if st.button("🔄 Analyze Another Resume"):
+            st.rerun()
+
+
+def enhanced_individual_analysis_page():
+    """Enhanced individual analysis page with local NLP analysis (No API required)"""
+    st.markdown('<h1 class="main-header">🔍 AI-Powered Resume Analysis</h1>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="info-box">
+    <h3>🎯 Advanced Resume Analysis</h3>
+    <p>Get comprehensive insights about your resume using advanced text processing and NLP techniques. 
+    No external APIs required - all analysis is done locally!</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Choose analyzer type
+    st.subheader("⚙️ Choose Analysis Method")
+    analyzer_type = st.radio(
+        "Select the type of analysis you prefer:",
+        ["🧠 Advanced NLP Analysis (Recommended)", "📊 Text Pattern Analysis"],
+        help="Advanced NLP uses machine learning techniques, while Text Pattern uses rule-based analysis"
+    )
+    
+    # Initialize analyzer
+    try:
+        with st.spinner("Initializing analyzer..."):
+            if analyzer_type == "🧠 Advanced NLP Analysis (Recommended)":
+                analyzer = ResumeAnalyzer()
+            else:
+                analyzer = TextAnalysisResumeAnalyzer()
+            st.success("✅ Analyzer ready!")
+    except Exception as e:
+        st.error(f"❌ Error initializing analyzer: {str(e)}")
+        st.info("💡 Try installing required packages: pip install nltk scikit-learn textstat")
+        return
+    
+    # Get data from database (assuming these functions exist)
+    try:
+        jobs = get_job_descriptions()
+        if st.session_state.user_role == "student":
+            resumes = get_user_resumes(st.session_state.user_id)
+        else:
+            resumes = get_user_resumes()
+    except:
+        # Fallback for demo purposes
+        jobs = []
+        resumes = []
+        st.info("📝 Upload a resume file below for analysis")
+    
+    # File upload option if no resumes in database
+    uploaded_file = None
+    if not resumes:
+        st.subheader("📁 Upload Resume")
+        uploaded_file = st.file_uploader(
+            "Choose your resume file",
+            type=['pdf', 'docx', 'doc', 'txt'],
+            help="Supported formats: PDF, Word documents, and text files"
+        )
+    
+    # File selection from database
+    selected_resume_id = None
+    selected_job_id = None
+    
+    if resumes:
+        col1, col2 = st.columns(2)
         
-        selected_job = st.selectbox("Choose a job description", list(job_options.keys()))
-        selected_job_id = job_options.get(selected_job)
+        with col1:
+            st.subheader("📄 Select Resume")
+            if st.session_state.get('user_role') == "student":
+                resume_options = {f"{resume[1]} - {resume[2]}": resume[0] for resume in resumes}
+            else:
+                resume_options = {f"{resume[1]} ({resume[4]}) - {resume[2]}": resume[0] for resume in resumes}
+            
+            selected_resume = st.selectbox("Choose a resume", list(resume_options.keys()))
+            selected_resume_id = resume_options.get(selected_resume)
+        
+        with col2:
+            st.subheader("💼 Select Job (Optional)")
+            job_options = {"No specific job": None}
+            if jobs:
+                job_options.update({f"{job[1]} - {job[2]}": job[0] for job in jobs})
+            
+            selected_job = st.selectbox("Choose a job description", list(job_options.keys()))
+            selected_job_id = job_options.get(selected_job)
     
     # Analysis options
     st.subheader("🔧 Analysis Options")
@@ -4097,68 +4305,201 @@ def enhanced_individual_analysis_page():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        include_learning_path = st.checkbox("Generate Learning Path", value=True)
+        detailed_analysis = st.checkbox("📊 Detailed Statistics", value=True)
     
     with col2:
-        include_industry_insights = st.checkbox("Include Industry Insights", value=True)
+        include_recommendations = st.checkbox("💡 Include Recommendations", value=True)
     
     with col3:
-        career_goals = st.text_input("Career Goals (Optional)", placeholder="e.g., Senior Developer, Team Lead")
+        compare_job = st.checkbox("🎯 Compare with Job Description", value=bool(selected_job_id))
     
     # Analysis button
-    if st.button("🚀 Start AI Analysis", type="primary", use_container_width=True):
-        if selected_resume_id:
-            with st.spinner("AI is analyzing your resume... This may take a few moments."):
-                try:
-                    # Get resume content
-                    resume_content = get_file_from_db(selected_resume_id, "resume")
-                    if not resume_content:
-                        st.error("Could not retrieve resume content")
-                        return
-                    
-                    # Extract text from resume
-                    resume_filename = [r[1] for r in resumes if r[0] == selected_resume_id][0]
-                    file_extension = resume_filename.split('.')[-1] if '.' in resume_filename else 'pdf'
-                    resume_text = extract_text_from_resume_file(resume_content, file_extension)
-                    
-                    if "Error" in resume_text:
-                        st.error(resume_text)
-                        return
-                    
-                    if len(resume_text.strip()) < 50:
-                        st.warning("Resume text seems too short. Please check if the file was processed correctly.")
-                        st.text_area("Extracted text preview:", resume_text[:500], height=100)
-                    
-                    # Get job description if selected
-                    job_description = ""
-                    if selected_job_id:
-                        job_content = get_file_from_db(selected_job_id, "job")
-                        if job_content:
-                            job_description = extract_text_from_resume_file(job_content, 'txt')
-                    
-                    # Perform AI analysis
-                    analysis_result = analyzer.analyze_resume_comprehensively(resume_text, job_description)
-                    
-                    # Generate learning path if requested
-                    learning_path = None
-                    if include_learning_path:
-                        skills_analysis = analysis_result.get("skill_gaps", {})
-                        learning_path = analyzer.generate_personalized_learning_path(skills_analysis, career_goals)
-                    
-                    # Get industry insights if requested
-                    industry_insights = None
-                    if include_industry_insights and job_description:
-                        industry_insights = analyzer.get_industry_insights(job_description, resume_text)
-                    
-                    # Display results
-                    display_gemini_analysis_results(analysis_result, learning_path, industry_insights)
-                    
-                except Exception as e:
-                    st.error(f"Error during AI analysis: {str(e)}")
-                    st.info("Please try again or contact support if the problem persists.")
+    if st.button("🚀 Start Analysis", type="primary", use_container_width=True):
+        resume_text = ""
+        job_description = ""
+        
+        # Get resume content
+        if uploaded_file:
+            try:
+                file_content = uploaded_file.read()
+                file_extension = uploaded_file.name.split('.')[-1] if '.' in uploaded_file.name else 'txt'
+                resume_text = extract_text_from_resume_file(file_content, file_extension)
+            except Exception as e:
+                st.error(f"❌ Error processing uploaded file: {str(e)}")
+                return
+        
+        elif selected_resume_id:
+            try:
+                resume_content = get_file_from_db(selected_resume_id, "resume")
+                if not resume_content:
+                    st.error("❌ Could not retrieve resume content")
+                    return
+                
+                resume_filename = [r[1] for r in resumes if r[0] == selected_resume_id][0]
+                file_extension = resume_filename.split('.')[-1] if '.' in resume_filename else 'pdf'
+                resume_text = extract_text_from_resume_file(resume_content, file_extension)
+            except Exception as e:
+                st.error(f"❌ Error retrieving resume: {str(e)}")
+                return
+        
         else:
-            st.warning("Please select a resume to analyze")
+            st.warning("⚠️ Please upload a resume file or select one from the database")
+            return
+        
+        # Check if resume text extraction was successful
+        if "Error" in resume_text:
+            st.error(resume_text)
+            return
+        
+        if len(resume_text.strip()) < 50:
+            st.warning("⚠️ Resume text seems too short. Please check if the file was processed correctly.")
+            with st.expander("📋 Show extracted text"):
+                st.text_area("Extracted text preview:", resume_text[:500], height=100)
+        
+        # Get job description if selected and comparison is enabled
+        if compare_job and selected_job_id:
+            try:
+                job_content = get_file_from_db(selected_job_id, "job")
+                if job_content:
+                    job_description = extract_text_from_resume_file(job_content, 'txt')
+            except Exception as e:
+                st.warning(f"⚠️ Could not load job description: {str(e)}")
+        
+        # Perform analysis
+        with st.spinner("🔍 Analyzing your resume... This may take a moment."):
+            try:
+                analysis_result = analyzer.analyze_resume_comprehensively(resume_text, job_description)
+                
+                # Display results
+                display_analysis_results(analysis_result)
+                
+                # Success message
+                st.success("✅ Analysis completed successfully!")
+                
+            except Exception as e:
+                st.error(f"❌ Error during analysis: {str(e)}")
+                st.info("💡 Please try again or contact support if the problem persists.")
 
+
+# Alternative simple analyzer for basic text analysis
+class SimpleResumeAnalyzer:
+    """Simple resume analyzer using basic text processing"""
+    
+    def __init__(self):
+        self.common_skills = [
+            'python', 'java', 'javascript', 'html', 'css', 'sql', 'git',
+            'react', 'angular', 'nodejs', 'django', 'flask', 'spring',
+            'aws', 'azure', 'docker', 'kubernetes', 'jenkins',
+            'machine learning', 'data analysis', 'project management',
+            'leadership', 'teamwork', 'communication'
+        ]
+    
+    def count_keywords(self, text: str, keywords: List[str]) -> Dict:
+        """Count occurrences of keywords in text"""
+        text_lower = text.lower()
+        keyword_counts = {}
+        
+        for keyword in keywords:
+            count = text_lower.count(keyword.lower())
+            if count > 0:
+                keyword_counts[keyword] = count
+        
+        return keyword_counts
+    
+    def basic_analysis(self, resume_text: str) -> Dict:
+        """Perform basic resume analysis"""
+        word_count = len(resume_text.split())
+        char_count = len(resume_text)
+        
+        # Count skills
+        skill_counts = self.count_keywords(resume_text, self.common_skills)
+        total_skills = len(skill_counts)
+        
+        # Basic scoring
+        length_score = min(10, word_count / 50)  # 1 point per 50 words, max 10
+        skill_score = min(10, total_skills)  # 1 point per skill, max 10
+        
+        overall_score = (length_score + skill_score) / 2
+        
+        # Generate basic insights
+        strengths = []
+        weaknesses = []
+        
+        if total_skills >= 5:
+            strengths.append(f"Good variety of skills mentioned ({total_skills} skills found)")
+        
+        if word_count >= 300:
+            strengths.append("Appropriate resume length")
+        
+        if total_skills < 3:
+            weaknesses.append("Few technical skills mentioned - consider adding more")
+        
+        if word_count < 200:
+            weaknesses.append("Resume may be too short - add more details")
+        
+        return {
+            "overall_assessment": {
+                "strength_score": round(overall_score, 1),
+                "readability_score": round(length_score, 1),
+                "ats_compatibility": 7.0,  # Default score
+                "summary": f"Basic analysis complete. Found {total_skills} skills in {word_count} words."
+            },
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "skills_found": skill_counts,
+            "resume_stats": {
+                "word_count": word_count,
+                "character_count": char_count,
+                "skills_count": total_skills
+            },
+            "improvement_suggestions": {
+                "immediate_actions": [
+                    "Add more technical skills relevant to your field",
+                    "Ensure resume length is between 300-600 words",
+                    "Include quantifiable achievements"
+                ],
+                "short_term_goals": [
+                    "Learn trending skills in your industry",
+                    "Add projects that demonstrate your abilities",
+                    "Get feedback from industry professionals"
+                ],
+                "long_term_development": [
+                    "Pursue relevant certifications",
+                    "Build a strong professional network",
+                    "Keep resume updated with latest experiences"
+                ]
+            }
+        }
+
+
+# CSS for better styling
+st.markdown("""
+<style>
+.main-header {
+    color: #1f77b4;
+    text-align: center;
+    padding: 20px 0;
+    border-bottom: 2px solid #1f77b4;
+    margin-bottom: 30px;
+}
+
+.info-box {
+    background-color: #f0f8ff;
+    border-left: 5px solid #1f77b4;
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 5px;
+}
+
+.metric-card {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+}
+</style>
+""", unsafe_allow
 def main():
     """Main application function"""
     init_session_state()
@@ -4205,6 +4546,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
