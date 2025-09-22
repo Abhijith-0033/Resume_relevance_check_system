@@ -20,6 +20,7 @@ import sqlite3
 import requests
 from pathlib import Path
 import traceback
+import time
 from datetime import datetime
 from typing import Dict, List, Any
 import logging
@@ -3468,6 +3469,19 @@ class GeminiResumeAnalyzer:
             print(f"Error finding available models: {str(e)}")
             # Return a fallback that will show error gracefully
             return None
+    import time
+
+def safe_generate_content(model, prompt, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            return model.generate_content(prompt)
+        except Exception as e:
+            print(f"Attempt {attempt+1} failed: {str(e)}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                return None
+
     
     def analyze_resume_comprehensively(self, resume_text: str, job_description: str = "") -> Dict:
         """Comprehensive resume analysis using Gemini AI"""
@@ -3556,7 +3570,9 @@ class GeminiResumeAnalyzer:
         """
         
         try:
-            response = self.model.generate_content(analysis_prompt)
+            response = safe_generate_content(self.model, analysis_prompt)
+            if response is None:
+                return self._get_fallback_analysis()
             
             # Extract JSON from response
             response_text = response.text
@@ -4181,6 +4197,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
