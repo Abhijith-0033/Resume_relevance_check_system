@@ -34,6 +34,8 @@ from datetime import datetime
 from typing import Dict, List, Any
 import logging
 # Download required NLTK data
+import nltk
+nltk.download('stopwords')
 nltk.download('punkt')   # Sentence tokenizer
 nltk.download('punkt_tab')
 
@@ -4838,6 +4840,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
